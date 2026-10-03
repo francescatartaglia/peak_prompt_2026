@@ -1,8 +1,12 @@
 /**
- * Procedural heartbeat — tempo tracks zone BPM; intensity (gain/bass/drive) ramps by zone.
+ * Procedural heartbeat — stesso timbro in tutte le zone;
+ * il volume è regolabile dall’utente.
  */
 
 import { DUB_RATIO, clampBpm, secondsPerBeat } from "./heartbeat.js";
+
+/** Timbro fisso (non cambia con la zona). */
+const TONE = { bass: 0.45, drive: 0.12, body: 0.55 };
 
 export function createHeartbeatAudio() {
   let ctx = null;
@@ -11,7 +15,7 @@ export function createHeartbeatAudio() {
   let enabled = false;
   let nextBeatIndex = 0;
   let visualOffset = 0;
-  let intensity = { gain: 0.3, bass: 0.4, drive: 0.1 };
+  let volume = 0.55;
   let master = null;
   let filter = null;
   let shaper = null;
@@ -34,18 +38,17 @@ export function createHeartbeatAudio() {
     if (master) return ac;
 
     master = ac.createGain();
-    master.gain.value = intensity.gain;
+    master.gain.value = volume;
 
     filter = ac.createBiquadFilter();
     filter.type = "lowpass";
-    filter.frequency.value = 180 + intensity.bass * 220;
+    filter.frequency.value = 180 + TONE.bass * 220;
     filter.Q.value = 0.8;
 
     shaper = ac.createWaveShaper();
-    shaper.curve = makeDistortionCurve(intensity.drive);
+    shaper.curve = makeDistortionCurve(TONE.drive);
     shaper.oversample = "2x";
 
-    // thump → filter → shaper → master → out
     filter.connect(shaper);
     shaper.connect(master);
     master.connect(ac.destination);
@@ -62,9 +65,7 @@ export function createHeartbeatAudio() {
 
   function thump(time, strength = 1) {
     const ac = ensureGraph();
-    const g = intensity.gain;
-    const bass = intensity.bass;
-    const drive = intensity.drive;
+    const { bass, drive, body } = TONE;
 
     const osc = ac.createOscillator();
     const oscGain = ac.createGain();
@@ -73,14 +74,13 @@ export function createHeartbeatAudio() {
     osc.frequency.setValueAtTime(baseFreq * strength + 20, time);
     osc.frequency.exponentialRampToValueAtTime(22, time + 0.18);
     oscGain.gain.setValueAtTime(0.0001, time);
-    oscGain.gain.exponentialRampToValueAtTime(0.85 * strength * (0.5 + g), time + 0.012);
+    oscGain.gain.exponentialRampToValueAtTime(0.85 * strength * body, time + 0.012);
     oscGain.gain.exponentialRampToValueAtTime(0.0001, time + 0.24);
     osc.connect(oscGain);
     oscGain.connect(filter);
     osc.start(time);
     osc.stop(time + 0.3);
 
-    // Body noise — louder/dirtier in high zones
     const noiseDur = 0.12 + drive * 0.08;
     const frames = Math.floor(ac.sampleRate * noiseDur);
     const buffer = ac.createBuffer(1, frames, ac.sampleRate);
@@ -123,13 +123,11 @@ export function createHeartbeatAudio() {
     timer = window.setTimeout(tick, lookaheadMs);
   }
 
-  function applyIntensity() {
+  function applyVolume() {
     if (!master || !ctx) return;
     const t = ctx.currentTime;
     master.gain.cancelScheduledValues(t);
-    master.gain.linearRampToValueAtTime(intensity.gain, t + 0.12);
-    filter.frequency.linearRampToValueAtTime(160 + intensity.bass * 260, t + 0.12);
-    shaper.curve = makeDistortionCurve(intensity.drive);
+    master.gain.linearRampToValueAtTime(volume, t + 0.08);
   }
 
   return {
@@ -141,7 +139,7 @@ export function createHeartbeatAudio() {
       const syncNow = ac.currentTime - visualOffset;
       nextBeatIndex = Math.max(0, Math.ceil(syncNow / spb));
       enabled = true;
-      applyIntensity();
+      applyVolume();
       if (timer) window.clearTimeout(timer);
       tick();
     },
@@ -159,13 +157,12 @@ export function createHeartbeatAudio() {
       const syncNow = ctx.currentTime - visualOffset;
       nextBeatIndex = Math.max(0, Math.ceil(syncNow / secondsPerBeat(bpm)));
     },
-    setIntensity({ gain, bass, drive }) {
-      intensity = {
-        gain: Math.min(1, Math.max(0, gain ?? intensity.gain)),
-        bass: Math.min(1, Math.max(0, bass ?? intensity.bass)),
-        drive: Math.min(1, Math.max(0, drive ?? intensity.drive)),
-      };
-      applyIntensity();
+    setVolume(next) {
+      volume = Math.min(1, Math.max(0, Number(next) || 0));
+      applyVolume();
+    },
+    getVolume() {
+      return volume;
     },
     getSyncTime(fallbackElapsed = 0) {
       if (!enabled || !ctx) return fallbackElapsed;

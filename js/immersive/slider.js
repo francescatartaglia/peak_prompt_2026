@@ -1,10 +1,10 @@
 /**
- * Slider zone ultra-minimale + toggle battito.
+ * Slider zone ultra-minimale (battito sempre attivo in background).
  */
 
 import { ZONE_ORDER, zoneConfig } from "./zones.js";
 
-export function createZoneSlider(root, { startZone = 1, onChange, onAudioToggle } = {}) {
+export function createZoneSlider(root, { startZone = 1, onChange } = {}) {
   const marks = ZONE_ORDER.map(
     (id) =>
       `<button type="button" class="zone-mark" data-zone="${id}" style="--z:${zoneConfig(id).accent}" aria-label="Zona ${id}"></button>`
@@ -12,7 +12,6 @@ export function createZoneSlider(root, { startZone = 1, onChange, onAudioToggle 
 
   root.innerHTML = `
     <div class="zone-bar" role="group" aria-label="Zona battito">
-      <button type="button" class="pulse-dot" id="btn-audio" aria-label="Battito cardiaco" title="Battito"></button>
       <div class="zone-slider">
         <div class="zone-fill" id="zone-fill"></div>
         <div class="zone-marks">${marks}</div>
@@ -23,7 +22,6 @@ export function createZoneSlider(root, { startZone = 1, onChange, onAudioToggle 
 
   const input = root.querySelector("#zone-range");
   const fill = root.querySelector("#zone-fill");
-  const audioBtn = root.querySelector("#btn-audio");
   let zone = startZone;
 
   function paint() {
@@ -46,12 +44,10 @@ export function createZoneSlider(root, { startZone = 1, onChange, onAudioToggle 
   root.querySelectorAll(".zone-mark").forEach((btn) => {
     btn.addEventListener("click", () => setZone(Number(btn.dataset.zone)));
   });
-  audioBtn.addEventListener("click", () => onAudioToggle?.(audioBtn));
 
   paint();
 
   return {
-    audioBtn,
     getZone: () => zone,
     setZone,
   };

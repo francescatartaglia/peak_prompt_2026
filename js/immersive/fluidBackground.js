@@ -49,8 +49,8 @@ const FRAG = /* glsl */ `
     vec2 uv = gl_FragCoord.xy / u_res.xy;
     vec2 p = uv * vec2(u_res.x / u_res.y, 1.0);
 
-    // Drift più veloce + vortici: sfondo più vivo
-    float t = u_time * 0.16;
+    // Drift + vortici (velocità scalata da JS via u_time / fluidSpeed zona)
+    float t = u_time * 0.12;
     vec2 q = p;
     q += 0.18 * vec2(
       fbm(p * 0.9 + vec2(t * 0.7, -t * 0.4)),
@@ -122,9 +122,16 @@ export function createFluidBackground(canvas) {
   let c1 = [0.84, 0.91, 0.97];
   let c2 = [0.66, 0.8, 0.94];
   let c3 = [0.93, 0.96, 0.99];
-  let target = { c1: c1.slice(), c2: c2.slice(), c3: c3.slice() };
+  let from = { c1: c1.slice(), c2: c2.slice(), c3: c3.slice() };
+  let to = { c1: c1.slice(), c2: c2.slice(), c3: c3.slice() };
+  let blendStart = 0;
+  let blendDuration = 0;
+  let blending = false;
   let raf = 0;
-  const start = performance.now();
+  let speed = 1;
+  let targetSpeed = 1;
+  let simTime = 0;
+  let lastNow = performance.now();
 
   function resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 1.25);
@@ -139,22 +146,60 @@ export function createFluidBackground(canvas) {
     gl.viewport(0, 0, canvas.width, canvas.height);
   }
 
-  function lerpArr(a, b, t) {
-    a[0] += (b[0] - a[0]) * t;
-    a[1] += (b[1] - a[1]) * t;
-    a[2] += (b[2] - a[2]) * t;
+  function mix3(a, b, t) {
+    return [
+      a[0] + (b[0] - a[0]) * t,
+      a[1] + (b[1] - a[1]) * t,
+      a[2] + (b[2] - a[2]) * t,
+    ];
+  }
+
+  function copy3(src, dst) {
+    dst[0] = src[0];
+    dst[1] = src[1];
+    dst[2] = src[2];
+  }
+
+  function smootherstep(t) {
+    const x = Math.min(1, Math.max(0, t));
+    return x * x * x * (x * (x * 6 - 15) + 10);
+  }
+
+  /** Ease molto soft: resta a lungo in fusione, poi cede al colore zona. */
+  function blendEase(u) {
+    // 0–0.62: da → mix, 0.62–1: mix → target
+    if (u <= 0.62) {
+      return 0.5 * smootherstep(u / 0.62);
+    }
+    return 0.5 + 0.5 * smootherstep((u - 0.62) / 0.38);
   }
 
   function frame() {
     raf = requestAnimationFrame(frame);
     resize();
-    lerpArr(c1, target.c1, 0.035);
-    lerpArr(c2, target.c2, 0.035);
-    lerpArr(c3, target.c3, 0.035);
+
+    const now = performance.now();
+    if (blending) {
+      const u = Math.min(1, (now - blendStart) / Math.max(blendDuration, 1));
+      const t = blendEase(u);
+      copy3(mix3(from.c1, to.c1, t), c1);
+      copy3(mix3(from.c2, to.c2, t), c2);
+      copy3(mix3(from.c3, to.c3, t), c3);
+      if (u >= 1) {
+        blending = false;
+        copy3(to.c1, c1);
+        copy3(to.c2, c2);
+        copy3(to.c3, c3);
+      }
+    }
+
+    speed += (targetSpeed - speed) * 0.04;
+    simTime += (now - lastNow) * 0.001 * speed;
+    lastNow = now;
 
     gl.useProgram(prog);
     gl.uniform2f(uRes, canvas.width, canvas.height);
-    gl.uniform1f(uTime, (performance.now() - start) * 0.001);
+    gl.uniform1f(uTime, simTime);
     gl.uniform3fv(uC1, c1);
     gl.uniform3fv(uC2, c2);
     gl.uniform3fv(uC3, c3);
@@ -166,10 +211,29 @@ export function createFluidBackground(canvas) {
   window.addEventListener("resize", resize);
 
   return {
-    setPalette({ a, b, c }) {
-      target.c1 = hexToRgb(a);
-      target.c2 = hexToRgb(b);
-      target.c3 = hexToRgb(c);
+    setPalette({ a, b, c }, { duration = 1.85 } = {}) {
+      const next = {
+        c1: hexToRgb(a),
+        c2: hexToRgb(b),
+        c3: hexToRgb(c),
+      };
+      if (!duration || duration <= 0) {
+        blending = false;
+        copy3(next.c1, c1);
+        copy3(next.c2, c2);
+        copy3(next.c3, c3);
+        from = { c1: c1.slice(), c2: c2.slice(), c3: c3.slice() };
+        to = { c1: next.c1.slice(), c2: next.c2.slice(), c3: next.c3.slice() };
+        return;
+      }
+      from = { c1: c1.slice(), c2: c2.slice(), c3: c3.slice() };
+      to = next;
+      blendStart = performance.now();
+      blendDuration = duration * 1000;
+      blending = true;
+    },
+    setSpeed(next) {
+      targetSpeed = Math.max(0.05, Number(next) || 1);
     },
     dispose() {
       cancelAnimationFrame(raf);

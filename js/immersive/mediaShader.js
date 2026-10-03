@@ -17,6 +17,7 @@ export const mediaFragmentShader = /* glsl */ `
   uniform sampler2D map;
   uniform float uSaturation;
   uniform float uContrast;
+  uniform float uBrightness;
   uniform float uOpacity;
 
   varying vec2 vUv;
@@ -30,7 +31,6 @@ export const mediaFragmentShader = /* glsl */ `
     return mix(vec3(l), c, sat);
   }
 
-  // Leggera “vibrance” sulle alte saturazioni (Zone 3–4)
   vec3 applyPunch(vec3 c, float amount) {
     float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
     vec3 d = c - l;
@@ -39,7 +39,8 @@ export const mediaFragmentShader = /* glsl */ `
 
   void main() {
     vec4 tex = texture2D(map, vUv);
-    vec3 graded = applyContrast(tex.rgb, uContrast);
+    vec3 graded = tex.rgb * uBrightness;
+    graded = applyContrast(graded, uContrast);
     graded = applySaturation(graded, uSaturation);
     float punch = clamp((uSaturation - 1.0) * 0.9, 0.0, 1.2);
     graded = applyPunch(graded, punch);
@@ -48,26 +49,34 @@ export const mediaFragmentShader = /* glsl */ `
   }
 `;
 
-export function createMediaMaterial(texture, { saturation = 0.3, contrast = 0.75 } = {}) {
+export function createMediaMaterial(texture, { saturation = 0.3, contrast = 0.75, brightness = 1 } = {}) {
   return new THREE.ShaderMaterial({
     uniforms: {
       map: { value: texture },
       uSaturation: { value: saturation },
       uContrast: { value: contrast },
+      uBrightness: { value: brightness },
       uOpacity: { value: 1 },
     },
     vertexShader: mediaVertexShader,
     fragmentShader: mediaFragmentShader,
     side: THREE.DoubleSide,
     transparent: true,
+    depthWrite: true,
+    depthTest: true,
+    // Vince contro i segmenti wireframe coplanari / vicini
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
     toneMapped: false,
   });
 }
 
-export function setShaderGrade(material, saturation, contrast) {
+export function setShaderGrade(material, saturation, contrast, brightness = 1) {
   if (!material?.uniforms) return;
   material.uniforms.uSaturation.value = saturation;
   material.uniforms.uContrast.value = contrast;
+  if (material.uniforms.uBrightness) material.uniforms.uBrightness.value = brightness;
 }
 
 export function setShaderOpacity(material, opacity) {

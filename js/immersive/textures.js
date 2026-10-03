@@ -1,11 +1,11 @@
 /**
- * Lightweight texture loading — downscale images; low-res looping video canvases.
+ * Texture ottimizzate: foto a buona risoluzione; video loop muti.
  */
 
 import * as THREE from "three";
 
-export const MAX_TEX_SIZE = 192;
-export const VIDEO_TEX_SIZE = 176;
+export const MAX_TEX_SIZE = 384;
+export const VIDEO_TEX_SIZE = 320;
 
 function loadImageElement(url) {
   return new Promise((resolve, reject) => {
@@ -29,6 +29,8 @@ export function canvasTextureFromImage(img, maxSize = MAX_TEX_SIZE) {
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext("2d", { alpha: false });
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
   ctx.drawImage(img, 0, 0, w, h);
 
   const tex = new THREE.CanvasTexture(canvas);
@@ -70,108 +72,117 @@ export function makePlaceholderTexture(kind = "image") {
   return { texture: tex, width: 128, height: 128, aspect: 1 };
 }
 
+/** Preferisce MP4 web-friendly se il path punta a un .MOV. */
+async function resolvePlayableUrl(url) {
+  if (!/\.mov$/i.test(url)) return url;
+  const candidates = [
+    url.replace(/\.mov$/i, ".mp4"),
+    url.replace(/phone\//i, "phone/web/").replace(/\.mov$/i, ".mp4"),
+  ];
+  for (const c of candidates) {
+    try {
+      const res = await fetch(c, { method: "HEAD" });
+      if (res.ok) return c;
+    } catch {
+      /* next */
+    }
+  }
+  return url;
+}
+
 /**
- * Muted looping video drawn into a small canvas (cheap VideoTexture stand-in).
+ * Video in loop, sempre muto, autoplay. Texture nativa.
+ * Usa MP4 H.264 (i .MOV iPhone/HEVC non partono in Chrome).
  */
-export function createOptimizedVideo(url, size = VIDEO_TEX_SIZE) {
+export async function createOptimizedVideo(url) {
+  const playable = await resolvePlayableUrl(url);
+
   return new Promise((resolve) => {
     const video = document.createElement("video");
-    video.src = url;
+    // Fuori schermo ma nel DOM: aiuta autoplay su alcuni browser
+    video.style.cssText =
+      "position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;left:-9999px;top:-9999px";
+    document.body.appendChild(video);
+
     video.muted = true;
+    video.defaultMuted = true;
+    video.volume = 0;
     video.loop = true;
     video.playsInline = true;
+    video.autoplay = true;
     video.setAttribute("playsinline", "");
+    video.setAttribute("webkit-playsinline", "");
     video.setAttribute("muted", "");
-    video.preload = "metadata";
-    video.crossOrigin = "anonymous";
+    video.setAttribute("loop", "");
+    video.setAttribute("autoplay", "");
+    video.preload = "auto";
+    // niente crossOrigin su same-origin: evita errori inutili
+    video.src = playable;
 
-    const canvas = document.createElement("canvas");
-    canvas.width = size;
-    canvas.height = size;
-    const ctx = canvas.getContext("2d", { alpha: false });
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.minFilter = THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    texture.generateMipmaps = false;
+    let settled = false;
+    const fail = () => {
+      if (settled) return;
+      settled = true;
+      video.remove();
+      resolve(null);
+    };
 
-    let aspect = 1;
-    let playing = false;
-    let raf = 0;
-    let lastDraw = 0;
+    const tryPlay = () => {
+      video.muted = true;
+      video.defaultMuted = true;
+      video.volume = 0;
+      video.loop = true;
+      const p = video.play();
+      if (p?.catch) p.catch(() => {});
+    };
 
-    const fail = () => resolve(null);
+    video.addEventListener("ended", () => {
+      try {
+        video.currentTime = 0;
+      } catch {
+        /* ignore */
+      }
+      tryPlay();
+    });
 
-    const draw = (now) => {
-      if (!playing) return;
-      raf = requestAnimationFrame(draw);
-      if (now - lastDraw < 66) return; // ~15 fps
-      lastDraw = now;
-      if (video.readyState < 2) return;
-      const vw = video.videoWidth || size;
-      const vh = video.videoHeight || size;
-      aspect = vw / Math.max(vh, 1);
-      // letterbox into square-ish canvas keeping aspect
-      ctx.fillStyle = "#111";
-      ctx.fillRect(0, 0, size, size);
-      let dw = size;
-      let dh = size;
-      if (aspect > 1) dh = size / aspect;
-      else dw = size * aspect;
-      ctx.drawImage(video, (size - dw) / 2, (size - dh) / 2, dw, dh);
+    const ready = () => {
+      if (settled) return;
+      settled = true;
+      const aspect =
+        (video.videoWidth || 1) / Math.max(video.videoHeight || 1, 1);
+
+      const texture = new THREE.VideoTexture(video);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.minFilter = THREE.LinearFilter;
+      texture.magFilter = THREE.LinearFilter;
+      texture.generateMipmaps = false;
       texture.needsUpdate = true;
+
+      tryPlay();
+
+      resolve({
+        texture,
+        video,
+        aspect,
+        play: tryPlay,
+        pause() {
+          video.pause();
+        },
+      });
     };
 
     video.addEventListener("error", fail, { once: true });
-    function paintFrame() {
-      if (video.readyState < 2) return;
-      const vw = video.videoWidth || size;
-      const vh = video.videoHeight || size;
-      aspect = vw / Math.max(vh, 1);
-      ctx.fillStyle = "#111";
-      ctx.fillRect(0, 0, size, size);
-      let dw = size;
-      let dh = size;
-      if (aspect > 1) dh = size / aspect;
-      else dw = size * aspect;
-      ctx.drawImage(video, (size - dw) / 2, (size - dh) / 2, dw, dh);
-      texture.needsUpdate = true;
-    }
+    video.addEventListener("loadeddata", ready, { once: true });
+    video.addEventListener("canplay", tryPlay);
 
-    video.addEventListener(
-      "loadeddata",
-      () => {
-        aspect = (video.videoWidth || 1) / Math.max(video.videoHeight || 1, 1);
-        try {
-          video.currentTime = 0.05;
-        } catch {
-          /* ignore */
-        }
-        paintFrame();
-        resolve({
-          texture,
-          video,
-          aspect,
-          play() {
-            playing = true;
-            video.muted = true;
-            const p = video.play();
-            if (p?.catch) p.catch(() => {});
-            cancelAnimationFrame(raf);
-            raf = requestAnimationFrame(draw);
-          },
-          pause() {
-            playing = false;
-            video.pause();
-            cancelAnimationFrame(raf);
-          },
-        });
-      },
-      { once: true }
-    );
-    video.addEventListener("seeked", paintFrame, { once: true });
+    // kick load
+    video.load();
+
     setTimeout(() => {
-      if (video.readyState < 2) fail();
-    }, 3500);
+      if (!settled) {
+        if (video.readyState >= 2) ready();
+        else fail();
+      }
+    }, 12000);
   });
 }

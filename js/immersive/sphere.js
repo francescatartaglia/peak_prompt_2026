@@ -11,8 +11,8 @@ import {
 } from "./textures.js";
 import { contractionEnvelope } from "./heartbeat.js";
 
-const SEG_W = 14;
-const SEG_H = 10;
+const SEG_W = 24;
+const SEG_H = 16;
 
 export function sphereSamples(count, radius) {
   const samples = [];
@@ -34,34 +34,54 @@ export function cellSize(radius, count) {
   return radius * Math.sqrt((4 * Math.PI) / n);
 }
 
-/** Flat plane bent onto a sphere so panels follow curvature. */
+/** Piano suddiviso, piegato sulla sfera (la scala dimensione è inclusa nella curva). */
 export function createCurvedGeometry(width, height, radius, wSeg = SEG_W, hSeg = SEG_H) {
   const geo = new THREE.PlaneGeometry(width, height, wSeg, hSeg);
   geo.userData.flat = new Float32Array(geo.attributes.position.array);
   geo.userData.width = width;
   geo.userData.height = height;
-  bendGeometry(geo, radius);
+  bendGeometry(geo, radius, 1);
   return geo;
 }
 
-export function bendGeometry(geo, radius) {
+/**
+ * Proietta il piano sulla sfera (adesivo sulla superficie esterna).
+ * Con +Z orientato verso l’esterno, i bordi vanno a z ≤ 0 (verso il centro):
+ * curvatura convessa vista da fuori.
+ */
+export function bendGeometry(geo, radius, scale = 1) {
   const flat = geo.userData.flat;
   if (!flat) return;
+  const w0 = geo.userData.width || 1;
+  const h0 = geo.userData.height || 1;
   const pos = geo.attributes.position;
   const R = Math.max(radius, 2);
+  const arcW = w0 * scale;
+  const arcH = h0 * scale;
+
   for (let i = 0; i < pos.count; i += 1) {
-    const x = flat[i * 3];
-    const y = flat[i * 3 + 1];
-    const theta = x / R;
-    const phi = y / R;
+    const u = flat[i * 3] / w0;
+    const v = flat[i * 3 + 1] / h0;
+    const theta = u * (arcW / R);
+    const phi = v * (arcH / R);
+
     const cx = Math.sin(theta) * Math.cos(phi) * R;
     const cy = Math.sin(phi) * R;
     const cz = Math.cos(theta) * Math.cos(phi) * R;
-    // Local origin at patch center; bulge follows sphere (outward = −Z after lookAt center)
+    // z = cz - R ≤ 0 → bordi rientrano verso il centro (incollate sopra)
     pos.setXYZ(i, cx, cy, cz - R);
   }
   pos.needsUpdate = true;
   geo.computeVertexNormals();
+}
+
+const _radial = new THREE.Vector3();
+const _outward = new THREE.Vector3(0, 0, 1);
+
+/** Orienta il pannello con +Z verso l’esterno (sopra la sfera). */
+function orientOutward(mesh, direction) {
+  _radial.copy(direction).normalize();
+  mesh.quaternion.setFromUnitVectors(_outward, _radial);
 }
 
 async function createMediaPanel(asset) {
@@ -90,6 +110,7 @@ async function createMediaPanel(asset) {
   mesh.userData.baseH = baseH;
   mesh.userData.homePosition = new THREE.Vector3();
   mesh.userData.homeQuaternion = new THREE.Quaternion();
+  mesh.userData.unitDir = new THREE.Vector3(0, 1, 0);
   mesh.userData.mediaScale = 1;
   mesh.visible = false;
 
@@ -99,6 +120,10 @@ async function createMediaPanel(asset) {
 export async function createImmersiveSphere(data, { maxPerZone = 64, onProgress } = {}) {
   const group = new THREE.Group();
   group.name = "immersive-sphere";
+
+  // Wireframe denso: la densità locale segue le rientranze della bolla
+  const dotWire = createDotWireframe(28000);
+  group.add(dotWire);
 
   const byZone = { 1: [], 2: [], 3: [], 4: [] };
   const allMeshes = [];
@@ -127,6 +152,7 @@ export async function createImmersiveSphere(data, { maxPerZone = 64, onProgress 
 
   return {
     group,
+    dotWire,
     byZone,
     allMeshes,
     activeMeshes: [],
@@ -139,13 +165,138 @@ export async function createImmersiveSphere(data, { maxPerZone = 64, onProgress 
   };
 }
 
+/** RNG deterministico (stesso pattern a ogni reload). */
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Punto uniforme random sulla sfera. */
+function randomOnSphere(rng) {
+  const u = rng() * 2 - 1;
+  const theta = rng() * Math.PI * 2;
+  const r = Math.sqrt(Math.max(0, 1 - u * u));
+  return new THREE.Vector3(r * Math.cos(theta), u, r * Math.sin(theta));
+}
+
+/**
+ * Nuvola irregolare: mix di punti liberi + piccoli ammassi sparsi
+ * (niente reticolo Fibonacci regolare).
+ */
+function createDotWireframe(count) {
+  const rng = mulberry32(0xa11ce);
+  const unit = new Float32Array(count * 3);
+
+  const seedCount = Math.max(24, Math.floor(count * 0.1));
+  const seeds = [];
+  for (let i = 0; i < seedCount; i += 1) seeds.push(randomOnSphere(rng));
+
+  const tmp = new THREE.Vector3();
+  for (let i = 0; i < count; i += 1) {
+    let p;
+    const roll = rng();
+    if (roll < 0.5) {
+      p = randomOnSphere(rng);
+    } else if (roll < 0.85) {
+      const seed = seeds[Math.floor(rng() * seeds.length)];
+      const scatter = 0.12 + rng() * 0.55;
+      tmp.set(rng() - 0.5, rng() - 0.5, rng() - 0.5).multiplyScalar(scatter);
+      p = seed.clone().add(tmp).normalize();
+    } else {
+      const seed = seeds[Math.floor(rng() * seeds.length)];
+      const scatter = 0.04 + rng() * 0.12;
+      tmp.set(rng() - 0.5, rng() - 0.5, rng() - 0.5).multiplyScalar(scatter);
+      p = seed.clone().add(tmp).normalize();
+    }
+
+    p.x += (rng() - 0.5) * 0.06;
+    p.y += (rng() - 0.5) * 0.06;
+    p.z += (rng() - 0.5) * 0.06;
+    p.normalize();
+
+    unit[i * 3] = p.x;
+    unit[i * 3 + 1] = p.y;
+    unit[i * 3 + 2] = p.z;
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(unit.slice(), 3));
+  geo.userData.unit = unit;
+
+  const mat = new THREE.PointsMaterial({
+    color: 0xf2f2f2,
+    size: 0.16,
+    sizeAttenuation: true,
+    transparent: true,
+    opacity: 0.78,
+    depthWrite: false,
+    depthTest: true,
+  });
+
+  const points = new THREE.Points(geo, mat);
+  points.name = "dot-wire";
+  points.renderOrder = -1;
+  return points;
+}
+
+/**
+ * Puntini sulla sfera regolare; spenti sotto le foto.
+ */
+function updateWireframe(sphere) {
+  const dots = sphere?.dotWire;
+  if (!dots) return;
+
+  const unit = dots.geometry.userData.unit;
+  const posAttr = dots.geometry.attributes.position;
+  const R = Math.max(sphere.radius, 0.01);
+  const meshes = sphere.activeMeshes || [];
+
+  const exclude = cellSize(R, Math.max(meshes.length, 1)) * 0.32;
+  const excludeSq = exclude * exclude;
+
+  for (let i = 0; i < posAttr.count; i += 1) {
+    const x = unit[i * 3] * R;
+    const y = unit[i * 3 + 1] * R;
+    const z = unit[i * 3 + 2] * R;
+
+    let underPhoto = false;
+    for (let m = 0; m < meshes.length; m += 1) {
+      const p = meshes[m].position;
+      const dx = x - p.x;
+      const dy = y - p.y;
+      const dz = z - p.z;
+      if (dx * dx + dy * dy + dz * dz < excludeSq) {
+        underPhoto = true;
+        break;
+      }
+    }
+
+    if (underPhoto) {
+      posAttr.setXYZ(i, NaN, NaN, NaN);
+    } else {
+      posAttr.setXYZ(i, x, y, z);
+    }
+  }
+
+  posAttr.needsUpdate = true;
+  dots.geometry.computeBoundingSphere();
+  dots.material.size = Math.max(0.1, Math.min(0.22, R * 0.006));
+  dots.material.opacity = 0.78;
+}
+
 function layoutMeshes(meshes, radius) {
   const samples = sphereSamples(Math.max(meshes.length, 1), radius);
   meshes.forEach((mesh, i) => {
     const pos = samples[i];
+    mesh.userData.unitDir.copy(pos).normalize();
     mesh.position.copy(pos);
-    mesh.lookAt(0, 0, 0);
-    bendGeometry(mesh.geometry, radius);
+    orientOutward(mesh, mesh.userData.unitDir);
     mesh.userData.homePosition.copy(pos);
     mesh.userData.homeQuaternion.copy(mesh.quaternion);
   });
@@ -158,7 +309,9 @@ function applyCoverageScale(sphere) {
     const base = Math.sqrt(mesh.userData.baseW * mesh.userData.baseH);
     const s = (cell * sphere.coverage) / Math.max(base, 0.001);
     mesh.userData.mediaScale = s;
-    mesh.scale.setScalar(s);
+    // Dimensione e curva insieme → le foto restano sulla sfera
+    bendGeometry(mesh.geometry, sphere.radius, s);
+    mesh.scale.setScalar(1);
   }
 }
 
@@ -169,13 +322,21 @@ export function setActiveZoneMedia(sphere, zoneId) {
     mesh.visible = on;
     const vh = mesh.userData.videoHandle;
     if (vh) {
-      if (on) vh.play();
-      else vh.pause();
+      if (on) {
+        if (vh.video) {
+          vh.video.muted = true;
+          vh.video.loop = true;
+        }
+        vh.play();
+      } else {
+        vh.pause();
+      }
     }
   }
   sphere.activeMeshes = active;
   layoutMeshes(active, sphere.radius);
   applyCoverageScale(sphere);
+  updateWireframe(sphere);
   return active;
 }
 
@@ -184,13 +345,15 @@ export function applyDensity(sphere, { radius, coverage }) {
   sphere.coverage = coverage;
   layoutMeshes(sphere.activeMeshes, radius);
   applyCoverageScale(sphere);
+  updateWireframe(sphere);
 }
 
-export function applyShaderGrade(sphere, saturation, contrast) {
+export function applyShaderGrade(sphere, saturation, contrast, brightness = 1) {
   sphere.saturation = saturation;
   sphere.contrast = contrast;
+  sphere.brightness = brightness;
   for (const mesh of sphere.activeMeshes) {
-    setShaderGrade(mesh.material, saturation, contrast);
+    setShaderGrade(mesh.material, saturation, contrast, brightness);
   }
 }
 
@@ -204,15 +367,35 @@ export function applyHeartbeat(sphere, transportTime, bpm) {
   if (!sphere) return 0;
   const { contraction } = contractionEnvelope(transportTime, bpm);
   sphere.group.scale.setScalar(1 - contraction * (sphere.groupPulse ?? 0.04));
+  // Pulse leggero sul mesh.scale (la curvatura resta corretta a scale≈1)
+  const pulse = 1 - contraction * sphere.pulseDepth;
   for (const mesh of sphere.activeMeshes) {
-    const base = mesh.userData.mediaScale || 1;
-    mesh.scale.setScalar(base * (1 - contraction * sphere.pulseDepth));
+    mesh.scale.setScalar(pulse);
   }
   return contraction;
 }
 
 export function resumeActiveVideos(sphere) {
   for (const mesh of sphere?.activeMeshes || []) {
-    mesh.userData.videoHandle?.play();
+    const vh = mesh.userData.videoHandle;
+    if (!vh) continue;
+    const v = vh.video;
+    if (v) {
+      v.muted = true;
+      v.defaultMuted = true;
+      v.volume = 0;
+      v.loop = true;
+    }
+    vh.play();
+  }
+}
+
+/** Riprende solo i video attivi che si sono fermati (chiamabile ogni frame). */
+export function keepVideosPlaying(sphere) {
+  for (const mesh of sphere?.activeMeshes || []) {
+    const vh = mesh.userData.videoHandle;
+    const v = vh?.video;
+    if (!v) continue;
+    if (v.paused || v.ended) vh.play();
   }
 }

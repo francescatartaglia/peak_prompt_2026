@@ -1,5 +1,5 @@
 /**
- * Load hike media (photos + videos only) grouped by HR zone.
+ * Load hike media (photos + videos) + audio ambient per zona.
  */
 
 import { ZONE_ORDER, zoneConfig } from "./zones.js";
@@ -28,6 +28,16 @@ export async function loadHikeData(url = "data/hike_viz.json") {
       }))
       .sort((a, b) => String(a.time).localeCompare(String(b.time)));
 
+    const audio = (raw.media || [])
+      .filter((m) => Number(m.zone) === id && m.kind === "audio")
+      .map((m) => ({
+        ...m,
+        zone: id,
+        bpm: Number(m.bpm),
+        kind: "audio",
+      }))
+      .sort((a, b) => String(a.time).localeCompare(String(b.time)));
+
     const bpms = media.map((m) => m.bpm).filter((v) => Number.isFinite(v));
     const avgBpm =
       stats.avgBpm ??
@@ -40,6 +50,7 @@ export async function loadHikeData(url = "data/hike_viz.json") {
       color: meta.color || cfg.accent,
       avgBpm: Number(avgBpm) || cfg.fallbackBpm,
       media,
+      audio,
       config: cfg,
     };
   }

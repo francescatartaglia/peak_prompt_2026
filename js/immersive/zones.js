@@ -15,10 +15,13 @@ export const ZONES = {
     accent: "#2b8fd4",
     radius: 32,
     coverage: 0.42,
-    saturation: 0.28, // molto piatto
-    contrast: 0.72,
+    saturation: 0.72,
+    contrast: 0.92,
+    brightness: 1.28,
     pulseDepth: 0.06,
     groupPulse: 0.03,
+    // Dinamismo sfondo: calmo in zona 1, accelera fino alla 4
+    fluidSpeed: 0.42,
     audio: { gain: 0.22, bass: 0.32, drive: 0.05 },
   },
   2: {
@@ -26,17 +29,19 @@ export const ZONES = {
     label: "Zone 2",
     range: "137–150 bpm",
     fallbackBpm: 143,
-    // Verde — chiaro / saturo / scuro
-    bgA: "#d4f06a",
-    bgB: "#3d9a28",
-    bgC: "#f0ffb0",
-    accent: "#4aaa2a",
+    // Verde bosco — ancora un filo più chiaro
+    bgA: "#6fa856",
+    bgB: "#245428",
+    bgC: "#a4c96e",
+    accent: "#4a8f3c",
     radius: 22,
     coverage: 0.85,
-    saturation: 0.85,
-    contrast: 1.05,
+    saturation: 1.2,
+    contrast: 1.18,
+    brightness: 1,
     pulseDepth: 0.1,
     groupPulse: 0.055,
+    fluidSpeed: 0.75,
     audio: { gain: 0.4, bass: 0.55, drive: 0.16 },
   },
   3: {
@@ -53,8 +58,10 @@ export const ZONES = {
     coverage: 1.2,
     saturation: 1.55,
     contrast: 1.42,
+    brightness: 1,
     pulseDepth: 0.15,
     groupPulse: 0.1,
+    fluidSpeed: 1.25,
     audio: { gain: 0.62, bass: 0.75, drive: 0.38 },
   },
   4: {
@@ -62,17 +69,19 @@ export const ZONES = {
     label: "Zone 4",
     range: "165+ bpm",
     fallbackBpm: 172,
-    // Rosso — shade diverse, più scuro
-    bgA: "#c42828",
-    bgB: "#3a060c",
-    bgC: "#8a1018",
-    accent: "#b01820",
+    // Rosso — contrasto alto tra chiaro / nero / saturo
+    bgA: "#ff5c4a",
+    bgB: "#0a0002",
+    bgC: "#c00818",
+    accent: "#e01228",
     radius: 8.4,
     coverage: 1.65, // zero gap, parete continua
     saturation: 2.25, // iper saturo
     contrast: 1.9,
+    brightness: 1,
     pulseDepth: 0.2,
     groupPulse: 0.14,
+    fluidSpeed: 1.9,
     audio: { gain: 0.92, bass: 0.95, drive: 0.8 },
   },
 };
