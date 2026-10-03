@@ -1,6 +1,10 @@
 /**
  * Quattro zone HR — densità, grade flat→ricco, sfondi colorati dinamici.
+ * Raggio sfera fisso: cambia solo la dimensione delle immagini (coverage).
  */
+
+/** Raggio costante in tutte le zone — spazio ampio centro ↔ pareti. */
+export const SPHERE_RADIUS = 56;
 
 export const ZONES = {
   1: {
@@ -13,10 +17,11 @@ export const ZONES = {
     bgB: "#1e7ec4",
     bgC: "#e8f6ff",
     accent: "#2b8fd4",
-    radius: 32,
-    coverage: 0.42,
-    saturation: 0.72,
-    contrast: 0.92,
+    radius: SPHERE_RADIUS,
+    // Più piccole: aria tra le foto
+    coverage: 0.34,
+    saturation: 1,
+    contrast: 1,
     brightness: 1.28,
     pulseDepth: 0.06,
     groupPulse: 0.03,
@@ -34,11 +39,12 @@ export const ZONES = {
     bgB: "#245428",
     bgC: "#a4c96e",
     accent: "#4a8f3c",
-    radius: 22,
-    coverage: 0.85,
-    saturation: 1.2,
-    contrast: 1.18,
-    brightness: 1,
+    radius: SPHERE_RADIUS,
+    // Un gradino sopra la zona 1
+    coverage: 0.48,
+    saturation: 1,
+    contrast: 1,
+    brightness: 1.28,
     pulseDepth: 0.1,
     groupPulse: 0.055,
     fluidSpeed: 0.75,
@@ -54,11 +60,12 @@ export const ZONES = {
     bgB: "#e04828",
     bgC: "#ffd078",
     accent: "#e85a22",
-    radius: 14,
-    coverage: 1.2,
-    saturation: 1.55,
-    contrast: 1.42,
-    brightness: 1,
+    radius: SPHERE_RADIUS,
+    // Ancora più grandi, senza riempire tutto
+    coverage: 0.62,
+    saturation: 1,
+    contrast: 1,
+    brightness: 1.28,
     pulseDepth: 0.15,
     groupPulse: 0.1,
     fluidSpeed: 1.25,
@@ -74,11 +81,12 @@ export const ZONES = {
     bgB: "#0a0002",
     bgC: "#c00818",
     accent: "#e01228",
-    radius: 8.4,
-    coverage: 1.65, // zero gap, parete continua
-    saturation: 2.25, // iper saturo
-    contrast: 1.9,
-    brightness: 1,
+    radius: SPHERE_RADIUS,
+    // Le più grandi: un filo sopra la vecchia zona 2 (~0.68)
+    coverage: 0.78,
+    saturation: 1,
+    contrast: 1,
+    brightness: 1.28,
     pulseDepth: 0.2,
     groupPulse: 0.14,
     fluidSpeed: 1.9,

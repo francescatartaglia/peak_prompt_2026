@@ -213,60 +213,58 @@ body {
   user-select: none;
 }
 
-.vol-range {
-  writing-mode: vertical-lr;
-  direction: rtl;
-  appearance: none;
+.vol-track {
+  position: relative;
   width: 1.15rem;
   height: 7.5rem;
-  margin: 0;
-  padding: 0;
-  background: transparent;
   cursor: pointer;
+  touch-action: none;
+  user-select: none;
 }
 
-.vol-range::-webkit-slider-runnable-track {
+.vol-track::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
   width: 1.5px;
-  border-radius: 999px;
-  background: linear-gradient(
-    to top,
-    var(--accent) 0%,
-    var(--accent) var(--vol, 55%),
-    rgba(20, 22, 26, 0.08) var(--vol, 55%),
-    rgba(20, 22, 26, 0.08) 100%
-  );
-}
-
-.vol-range::-webkit-slider-thumb {
-  appearance: none;
-  width: 12px;
-  height: 12px;
-  margin-left: -5.25px;
-  border-radius: 50%;
-  background: #fff;
-  border: 1.5px solid var(--accent);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}
-
-.vol-range::-moz-range-track {
-  width: 1.5px;
+  transform: translateX(-50%);
   border-radius: 999px;
   background: rgba(20, 22, 26, 0.08);
 }
 
-.vol-range::-moz-range-progress {
+.vol-fill {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
   width: 1.5px;
+  height: var(--vol, 55%);
+  transform: translateX(-50%);
   border-radius: 999px;
   background: var(--accent);
+  pointer-events: none;
 }
 
-.vol-range::-moz-range-thumb {
+.vol-thumb {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--vol, 55%) - 6px);
   width: 12px;
   height: 12px;
+  margin: 0;
+  padding: 0;
+  transform: translateX(-50%);
   border-radius: 50%;
   background: #fff;
   border: 1.5px solid var(--accent);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  cursor: grab;
+  touch-action: none;
+}
+
+.vol-thumb:active {
+  cursor: grabbing;
 }
 
 @media (max-width: 640px) {
@@ -278,7 +276,7 @@ body {
     right: 0.65rem;
   }
 
-  .vol-range {
+  .vol-track {
     height: 5.5rem;
   }
 }

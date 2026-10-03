@@ -13,20 +13,100 @@ import { contractionEnvelope } from "./heartbeat.js";
 
 const SEG_W = 24;
 const SEG_H = 16;
+/**
+ * Stacking senza staccare le foto dalla parete:
+ * solo renderOrder + polygonOffset (niente offset radiale).
+ */
 
-export function sphereSamples(count, radius) {
-  const samples = [];
+/** Fibonacci sphere: punti quasi equidistribuiti sulla sfera unitaria. */
+function fibonacciSphere(count) {
   const n = Math.max(count, 1);
   const golden = Math.PI * (3 - Math.sqrt(5));
+  const out = [];
   for (let i = 0; i < n; i += 1) {
-    const y = n === 1 ? 0 : 1 - (i / (n - 1)) * 2;
+    const y = n === 1 ? 0 : 1 - (2 * (i + 0.5)) / n;
     const r = Math.sqrt(Math.max(0, 1 - y * y));
     const theta = golden * i;
-    samples.push(
-      new THREE.Vector3(Math.cos(theta) * r, y, Math.sin(theta) * r).multiplyScalar(radius)
-    );
+    out.push(new THREE.Vector3(Math.cos(theta) * r, y, Math.sin(theta) * r));
   }
-  return samples;
+  return out;
+}
+
+/**
+ * Farthest-point sampling: sceglie `k` punti il più omogenei possibile
+ * da un insieme denso di candidati (ideale per poche foto, es. zona 4).
+ */
+function farthestPointSample(candidates, k) {
+  const n = candidates.length;
+  const count = Math.min(Math.max(k, 1), n);
+  const selected = [];
+  const minDist = new Float64Array(n).fill(Infinity);
+
+  // Start deterministico: vicino al polo “equatoriale” (+Z)
+  let start = 0;
+  let bestZ = -Infinity;
+  for (let i = 0; i < n; i += 1) {
+    if (candidates[i].z > bestZ) {
+      bestZ = candidates[i].z;
+      start = i;
+    }
+  }
+  selected.push(candidates[start].clone());
+
+  for (let s = 1; s < count; s += 1) {
+    const last = selected[s - 1];
+    let bestI = 0;
+    let bestD = -1;
+    for (let i = 0; i < n; i += 1) {
+      const d = candidates[i].distanceToSquared(last);
+      if (d < minDist[i]) minDist[i] = d;
+      if (minDist[i] > bestD) {
+        bestD = minDist[i];
+        bestI = i;
+      }
+    }
+    selected.push(candidates[bestI].clone());
+  }
+  return selected;
+}
+
+/** Leggera repulsione sulla sfera per chiudere i residui di clustering. */
+function relaxOnSphere(dirs, iterations = 10) {
+  const n = dirs.length;
+  if (n < 3) return dirs;
+  const forces = Array.from({ length: n }, () => new THREE.Vector3());
+  const away = new THREE.Vector3();
+  const minAng = Math.sqrt((4 * Math.PI) / n) * 0.92;
+
+  for (let it = 0; it < iterations; it += 1) {
+    for (let i = 0; i < n; i += 1) forces[i].set(0, 0, 0);
+    for (let i = 0; i < n; i += 1) {
+      for (let j = i + 1; j < n; j += 1) {
+        const dot = Math.min(0.9999, Math.max(-0.9999, dirs[i].dot(dirs[j])));
+        const ang = Math.acos(dot);
+        if (ang >= minAng || ang < 1e-6) continue;
+        const push = (minAng - ang) / minAng;
+        away.copy(dirs[i]).addScaledVector(dirs[j], -dot).normalize();
+        forces[i].addScaledVector(away, push);
+        forces[j].addScaledVector(away, -push);
+      }
+    }
+    const t = 0.4 * (1 - it / iterations);
+    for (let i = 0; i < n; i += 1) {
+      dirs[i].addScaledVector(forces[i], t).normalize();
+    }
+  }
+  return dirs;
+}
+
+/** Campioni omogenei sulla sfera (buoni anche con poche foto). */
+export function sphereSamples(count, radius) {
+  const n = Math.max(count, 1);
+  const candidateN = Math.max(220, n * 48);
+  const candidates = fibonacciSphere(candidateN);
+  const picked = farthestPointSample(candidates, n);
+  relaxOnSphere(picked, n <= 16 ? 18 : 10);
+  return picked.map((p) => p.multiplyScalar(radius));
 }
 
 export function cellSize(radius, count) {
@@ -156,7 +236,7 @@ export async function createImmersiveSphere(data, { maxPerZone = 64, onProgress 
     byZone,
     allMeshes,
     activeMeshes: [],
-    radius: 34,
+    radius: 56,
     coverage: 0.36,
     saturation: 0.42,
     contrast: 0.82,
@@ -186,38 +266,64 @@ function randomOnSphere(rng) {
 }
 
 /**
- * Nuvola irregolare: mix di punti liberi + piccoli ammassi sparsi
- * (niente reticolo Fibonacci regolare).
+ * Nuvola irregolare a grappoli: zone dense e zone più vuote
+ * (niente distribuzione omogenea).
  */
 function createDotWireframe(count) {
   const rng = mulberry32(0xa11ce);
   const unit = new Float32Array(count * 3);
 
-  const seedCount = Math.max(24, Math.floor(count * 0.1));
+  // Pochi semi → ammassi grossi, con densità molto variabile
+  const seedCount = Math.max(14, Math.floor(count * 0.035));
   const seeds = [];
-  for (let i = 0; i < seedCount; i += 1) seeds.push(randomOnSphere(rng));
+  const seedWeight = [];
+  for (let i = 0; i < seedCount; i += 1) {
+    seeds.push(randomOnSphere(rng));
+    // Pesi sperequati: alcuni cluster enormi, altri piccoli
+    seedWeight.push(rng() ** 2.4 + 0.05);
+  }
+  let weightSum = seedWeight.reduce((a, b) => a + b, 0);
+
+  function pickSeed() {
+    let r = rng() * weightSum;
+    for (let i = 0; i < seedCount; i += 1) {
+      r -= seedWeight[i];
+      if (r <= 0) return seeds[i];
+    }
+    return seeds[seedCount - 1];
+  }
 
   const tmp = new THREE.Vector3();
   for (let i = 0; i < count; i += 1) {
     let p;
     const roll = rng();
-    if (roll < 0.5) {
+    if (roll < 0.12) {
+      // Pochi punti sparsi isolati
       p = randomOnSphere(rng);
-    } else if (roll < 0.85) {
-      const seed = seeds[Math.floor(rng() * seeds.length)];
-      const scatter = 0.12 + rng() * 0.55;
+    } else if (roll < 0.4) {
+      // Alone largo intorno a un cluster
+      const seed = pickSeed();
+      const scatter = 0.25 + rng() * 0.85;
+      tmp.set(rng() - 0.5, rng() - 0.5, rng() - 0.5).multiplyScalar(scatter);
+      p = seed.clone().add(tmp).normalize();
+    } else if (roll < 0.78) {
+      // Nucleo medio del cluster
+      const seed = pickSeed();
+      const scatter = 0.06 + rng() * 0.22;
       tmp.set(rng() - 0.5, rng() - 0.5, rng() - 0.5).multiplyScalar(scatter);
       p = seed.clone().add(tmp).normalize();
     } else {
-      const seed = seeds[Math.floor(rng() * seeds.length)];
-      const scatter = 0.04 + rng() * 0.12;
+      // Nucleo strettissimo (grappoli densi)
+      const seed = pickSeed();
+      const scatter = 0.012 + rng() * 0.06;
       tmp.set(rng() - 0.5, rng() - 0.5, rng() - 0.5).multiplyScalar(scatter);
       p = seed.clone().add(tmp).normalize();
     }
 
-    p.x += (rng() - 0.5) * 0.06;
-    p.y += (rng() - 0.5) * 0.06;
-    p.z += (rng() - 0.5) * 0.06;
+    // Rumore locale asymmetrico
+    p.x += (rng() - 0.5) * 0.1;
+    p.y += (rng() - 0.5) * 0.08;
+    p.z += (rng() - 0.5) * 0.1;
     p.normalize();
 
     unit[i * 3] = p.x;
@@ -246,7 +352,8 @@ function createDotWireframe(count) {
 }
 
 /**
- * Puntini sulla sfera regolare; spenti sotto le foto.
+ * Puntini su tutta la sfera (anche vicino/sotto le foto — niente alone vuoto).
+ * Salva la maschera `alive` per il pulse a scosse del battito.
  */
 function updateWireframe(sphere) {
   const dots = sphere?.dotWire;
@@ -255,39 +362,93 @@ function updateWireframe(sphere) {
   const unit = dots.geometry.userData.unit;
   const posAttr = dots.geometry.attributes.position;
   const R = Math.max(sphere.radius, 0.01);
-  const meshes = sphere.activeMeshes || [];
-
-  const exclude = cellSize(R, Math.max(meshes.length, 1)) * 0.32;
-  const excludeSq = exclude * exclude;
+  let alive = dots.geometry.userData.alive;
+  if (!alive || alive.length !== posAttr.count) {
+    alive = new Uint8Array(posAttr.count);
+    dots.geometry.userData.alive = alive;
+  }
 
   for (let i = 0; i < posAttr.count; i += 1) {
-    const x = unit[i * 3] * R;
-    const y = unit[i * 3 + 1] * R;
-    const z = unit[i * 3 + 2] * R;
-
-    let underPhoto = false;
-    for (let m = 0; m < meshes.length; m += 1) {
-      const p = meshes[m].position;
-      const dx = x - p.x;
-      const dy = y - p.y;
-      const dz = z - p.z;
-      if (dx * dx + dy * dy + dz * dz < excludeSq) {
-        underPhoto = true;
-        break;
-      }
-    }
-
-    if (underPhoto) {
-      posAttr.setXYZ(i, NaN, NaN, NaN);
-    } else {
-      posAttr.setXYZ(i, x, y, z);
-    }
+    alive[i] = 1;
+    posAttr.setXYZ(i, unit[i * 3] * R, unit[i * 3 + 1] * R, unit[i * 3 + 2] * R);
   }
 
   posAttr.needsUpdate = true;
   dots.geometry.computeBoundingSphere();
-  dots.material.size = Math.max(0.1, Math.min(0.22, R * 0.006));
+  const baseSize = Math.max(0.1, Math.min(0.22, R * 0.006));
+  dots.userData.baseSize = baseSize;
+  dots.material.size = baseSize;
   dots.material.opacity = 0.78;
+}
+
+/** Hash 0..1 stabile per scosse sfalsate sul wireframe. */
+function hash01(i) {
+  const x = Math.sin(i * 127.1 + 311.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+/**
+ * Scosse del battito sul wireframe puntinato:
+ * snap radiale + jitter tangenziale sfalsato per punto.
+ */
+function applyWireframePulse(sphere, contraction, timeSec) {
+  const dots = sphere?.dotWire;
+  if (!dots) return;
+
+  const unit = dots.geometry.userData.unit;
+  const alive = dots.geometry.userData.alive;
+  const posAttr = dots.geometry.attributes.position;
+  if (!unit || !alive || !posAttr) return;
+
+  const R = Math.max(sphere.radius, 0.01);
+  const c = Math.min(1, Math.max(0, contraction));
+  const t = timeSec;
+
+  for (let i = 0; i < posAttr.count; i += 1) {
+    if (!alive[i]) {
+      posAttr.setXYZ(i, NaN, NaN, NaN);
+      continue;
+    }
+    const ux = unit[i * 3];
+    const uy = unit[i * 3 + 1];
+    const uz = unit[i * 3 + 2];
+    const h = hash01(i);
+    // Doppio picco “lub-dub” locale + rumore a scossa
+    const shock =
+      c *
+      (0.5 +
+        0.5 * Math.sin(h * 36.0 + t * 26.0) *
+          Math.sin(h * 11.0 + t * 54.0 + c * 9.0));
+    const radial = 1 - shock * (0.02 + h * 0.03);
+    // Tangente grezza per lo shake
+    const tx = -uz;
+    const tz = ux;
+    const tLen = Math.hypot(tx, tz) || 1;
+    const shake = shock * (0.012 + h * 0.018) * Math.sin(h * 80.0 + t * 48.0);
+    const sx = (tx / tLen) * shake * R;
+    const sz = (tz / tLen) * shake * R;
+    const sy = shock * 0.008 * Math.sin(h * 50.0 + t * 37.0) * R;
+
+    posAttr.setXYZ(i, ux * R * radial + sx, uy * R * radial + sy, uz * R * radial + sz);
+  }
+
+  posAttr.needsUpdate = true;
+  const base = dots.userData.baseSize || 0.16;
+  dots.material.size = base * (1 + c * (0.65 + 0.35 * Math.sin(t * 42)));
+  dots.material.opacity = 0.52 + c * 0.45;
+}
+
+/** Assegna chi sta sopra (foto sempre sulla stessa parete). */
+function applyStackDepth(mesh, layer) {
+  mesh.userData.stackLayer = layer;
+  mesh.renderOrder = 100 + layer;
+  const mat = mesh.material;
+  if (!mat) return;
+  mat.polygonOffset = true;
+  mat.polygonOffsetFactor = -(1 + layer * 2);
+  mat.polygonOffsetUnits = -(1 + layer);
+  mat.depthTest = true;
+  mat.depthWrite = true;
 }
 
 function layoutMeshes(meshes, radius) {
@@ -295,9 +456,11 @@ function layoutMeshes(meshes, radius) {
   meshes.forEach((mesh, i) => {
     const pos = samples[i];
     mesh.userData.unitDir.copy(pos).normalize();
-    mesh.position.copy(pos);
+    applyStackDepth(mesh, i);
+    // Sempre sulla parete (stesso raggio per tutte)
+    mesh.position.copy(mesh.userData.unitDir).multiplyScalar(radius);
     orientOutward(mesh, mesh.userData.unitDir);
-    mesh.userData.homePosition.copy(pos);
+    mesh.userData.homePosition.copy(mesh.position);
     mesh.userData.homeQuaternion.copy(mesh.quaternion);
   });
 }
@@ -305,14 +468,23 @@ function layoutMeshes(meshes, radius) {
 function applyCoverageScale(sphere) {
   const n = sphere.activeMeshes.length;
   const cell = cellSize(sphere.radius, n);
-  for (const mesh of sphere.activeMeshes) {
+  const cov = sphere.coverage;
+  const R = sphere.radius;
+  sphere.activeMeshes.forEach((mesh, i) => {
+    const layer = mesh.userData.stackLayer ?? i;
     const base = Math.sqrt(mesh.userData.baseW * mesh.userData.baseH);
-    const s = (cell * sphere.coverage) / Math.max(base, 0.001);
+    let s = (cell * cov) / Math.max(base, 0.001);
+    // Vicine → stretch (non blur): allarga le foto fino a sovrapporsi
+    if (cov > 0.92) {
+      const over = Math.min(cov - 0.92, 0.4);
+      s *= 1 + over * 0.42;
+    }
     mesh.userData.mediaScale = s;
-    // Dimensione e curva insieme → le foto restano sulla sfera
-    bendGeometry(mesh.geometry, sphere.radius, s);
+    // Curvatura = raggio sfera → adesive alle pareti
+    bendGeometry(mesh.geometry, R, s);
     mesh.scale.setScalar(1);
-  }
+    applyStackDepth(mesh, layer);
+  });
 }
 
 export function setActiveZoneMedia(sphere, zoneId) {
@@ -372,6 +544,8 @@ export function applyHeartbeat(sphere, transportTime, bpm) {
   for (const mesh of sphere.activeMeshes) {
     mesh.scale.setScalar(pulse);
   }
+  // Wireframe: scosse sfalsate a ogni battito
+  applyWireframePulse(sphere, contraction, transportTime);
   return contraction;
 }
 

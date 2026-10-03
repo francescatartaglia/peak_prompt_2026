@@ -1,5 +1,5 @@
 /**
- * Trattamento foto: piatto/neutro → iper saturo e contrastato.
+ * Trattamento foto — colori fedeli, bordi netti (niente sfocatura).
  */
 
 import * as THREE from "three";
@@ -31,25 +31,17 @@ export const mediaFragmentShader = /* glsl */ `
     return mix(vec3(l), c, sat);
   }
 
-  vec3 applyPunch(vec3 c, float amount) {
-    float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
-    vec3 d = c - l;
-    return c + d * amount * 0.35;
-  }
-
   void main() {
     vec4 tex = texture2D(map, vUv);
     vec3 graded = tex.rgb * uBrightness;
     graded = applyContrast(graded, uContrast);
     graded = applySaturation(graded, uSaturation);
-    float punch = clamp((uSaturation - 1.0) * 0.9, 0.0, 1.2);
-    graded = applyPunch(graded, punch);
     graded = clamp(graded, 0.0, 1.0);
     gl_FragColor = vec4(graded, tex.a * uOpacity);
   }
 `;
 
-export function createMediaMaterial(texture, { saturation = 0.3, contrast = 0.75, brightness = 1 } = {}) {
+export function createMediaMaterial(texture, { saturation = 1, contrast = 1, brightness = 1 } = {}) {
   return new THREE.ShaderMaterial({
     uniforms: {
       map: { value: texture },
@@ -61,13 +53,14 @@ export function createMediaMaterial(texture, { saturation = 0.3, contrast = 0.75
     vertexShader: mediaVertexShader,
     fragmentShader: mediaFragmentShader,
     side: THREE.DoubleSide,
-    transparent: true,
+    // Opache di default: depth buffer pulito (una foto copre l’altra)
+    transparent: false,
     depthWrite: true,
     depthTest: true,
-    // Vince contro i segmenti wireframe coplanari / vicini
+    blending: THREE.NormalBlending,
     polygonOffset: true,
-    polygonOffsetFactor: -2,
-    polygonOffsetUnits: -2,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
     toneMapped: false,
   });
 }
@@ -80,5 +73,16 @@ export function setShaderGrade(material, saturation, contrast, brightness = 1) {
 }
 
 export function setShaderOpacity(material, opacity) {
-  if (material?.uniforms?.uOpacity) material.uniforms.uOpacity.value = opacity;
+  if (!material?.uniforms?.uOpacity) return;
+  const o = Math.min(1, Math.max(0, Number(opacity) ?? 1));
+  material.uniforms.uOpacity.value = o;
+  // Solo durante i fade: trasparenza. A opacity≈1 resta opaca per lo stacking.
+  const fade = o < 0.999;
+  material.transparent = fade;
+  material.depthWrite = !fade || o > 0.85;
+}
+
+/** Compat: non usiamo più bordi soft. */
+export function setShaderEdgeSoft(material) {
+  if (material) material.depthWrite = true;
 }

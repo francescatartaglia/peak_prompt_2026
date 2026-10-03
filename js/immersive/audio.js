@@ -126,8 +126,10 @@ export function createHeartbeatAudio() {
   function applyVolume() {
     if (!master || !ctx) return;
     const t = ctx.currentTime;
+    const current = Number.isFinite(master.gain.value) ? master.gain.value : volume;
     master.gain.cancelScheduledValues(t);
-    master.gain.linearRampToValueAtTime(volume, t + 0.08);
+    master.gain.setValueAtTime(current, t);
+    master.gain.linearRampToValueAtTime(volume, t + 0.05);
   }
 
   return {

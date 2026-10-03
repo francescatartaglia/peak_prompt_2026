@@ -5,9 +5,18 @@
 
 const FADE_MS = 1400;
 const LEAD_SEC = 1.55;
-const TARGET_RMS = 0.085;
-const MIN_GAIN = 0.35;
-const MAX_GAIN = 3.2;
+const TARGET_RMS = 0.11;
+const MIN_GAIN = 0.4;
+const MAX_GAIN = 4.2;
+/** Extra sulle atmosfere (vento, acqua, uccelli…); voci un filo sotto. */
+const AMBIENT_RE =
+  /uccelli|atmosfera|respiro|foglie|vento|acqua|grotta|brum|passi|eco(?!\s*risata)|rocce|cammino/i;
+
+function levelBoost(path) {
+  const name = String(path).split("/").pop() || "";
+  if (AMBIENT_RE.test(name)) return 1.55;
+  return 1.15;
+}
 
 function encodePath(path) {
   return String(path)
@@ -68,7 +77,7 @@ export function createZoneAmbient() {
   let index = 0;
   let current = null; // { el, src, gain }
   let pending = null;
-  let volume = 0.62;
+  let volume = 0.72;
   let playing = false;
   let crossfading = false;
   let gen = 0;
@@ -134,7 +143,10 @@ export function createZoneAmbient() {
       const raw = await res.arrayBuffer();
       const buf = await ac.decodeAudioData(raw.slice(0));
       const rms = Math.max(computeRms(buf), 1e-4);
-      const g = Math.min(MAX_GAIN, Math.max(MIN_GAIN, TARGET_RMS / rms));
+      const g = Math.min(
+        MAX_GAIN,
+        Math.max(MIN_GAIN, (TARGET_RMS / rms) * levelBoost(path))
+      );
       gainCache.set(path, g);
       return g;
     } catch (err) {
