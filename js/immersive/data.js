@@ -1,8 +1,8 @@
 /**
- * Load hike_viz.json and group media by the 4 HR zones.
+ * Load hike media (photos + videos only) grouped by HR zone.
  */
 
-export const ZONE_ORDER = [1, 2, 3, 4];
+import { ZONE_ORDER, zoneConfig } from "./zones.js";
 
 export async function loadHikeData(url = "data/hike_viz.json") {
   const res = await fetch(url);
@@ -10,46 +10,44 @@ export async function loadHikeData(url = "data/hike_viz.json") {
     throw new Error("Missing data/hike_viz.json — run: python3 scripts/process_hike_viz.py");
   }
   const raw = await res.json();
-  return normalize(raw);
-}
-
-function normalize(raw) {
   const zones = {};
+
   for (const id of ZONE_ORDER) {
     const key = String(id);
-    const meta = raw.zones?.[key] || raw.zones?.[id] || {};
-    const mediaStats = raw.mediaZoneStats?.[key] || {};
+    const meta = raw.zones?.[key] || {};
+    const stats = raw.mediaZoneStats?.[key] || {};
+    const cfg = zoneConfig(id);
     const media = (raw.media || [])
       .filter((m) => Number(m.zone) === id)
+      .filter((m) => m.kind === "image" || m.kind === "video")
+      .map((m) => ({
+        ...m,
+        zone: id,
+        bpm: Number(m.bpm),
+        kind: m.kind,
+      }))
       .sort((a, b) => String(a.time).localeCompare(String(b.time)));
 
-    const bpms = media.map((m) => m.bpm).filter((v) => v != null);
+    const bpms = media.map((m) => m.bpm).filter((v) => Number.isFinite(v));
     const avgBpm =
-      mediaStats.avgBpm ??
-      (bpms.length ? bpms.reduce((s, v) => s + v, 0) / bpms.length : fallbackBpm(id));
+      stats.avgBpm ??
+      (bpms.length ? bpms.reduce((s, v) => s + v, 0) / bpms.length : cfg.fallbackBpm);
 
     zones[id] = {
       id,
-      label: meta.label || `Zone ${id}`,
-      range: meta.range || "",
-      color: meta.color || "#ffffff",
-      tint: meta.tint || meta.color || "#ffffff",
-      avgBpm: Number(avgBpm) || fallbackBpm(id),
+      label: meta.label || cfg.label,
+      range: meta.range || cfg.range,
+      color: meta.color || cfg.accent,
+      avgBpm: Number(avgBpm) || cfg.fallbackBpm,
       media,
-      timeMinutes: raw.zoneStats?.[key]?.minutes ?? null,
-      timePercent: raw.zoneStats?.[key]?.percent ?? null,
+      config: cfg,
     };
   }
 
   return {
     title: raw.title || "Rifugio Lagazuoi",
-    stats: raw.stats || {},
     zones,
   };
-}
-
-function fallbackBpm(zoneId) {
-  return { 1: 120, 2: 143, 3: 158, 4: 172 }[zoneId] || 120;
 }
 
 export function zoneList(data) {

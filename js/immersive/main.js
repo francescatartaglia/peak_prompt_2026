@@ -1,9 +1,19 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { loadHikeData, zoneList } from "./data.js";
+import { loadHikeData } from "./data.js";
+import { zoneConfig } from "./zones.js";
+import { createFluidBackground } from "./fluidBackground.js";
 import { createHeartbeatAudio } from "./audio.js";
-import { createZoneTorus, applyPulse, applySpin } from "./torus.js";
-import { createFocusController } from "./focus.js";
+import {
+  createImmersiveSphere,
+  setActiveZoneMedia,
+  applyDensity,
+  applyShaderGrade,
+  applyMediaOpacity,
+  applyHeartbeat,
+  resumeActiveVideos,
+} from "./sphere.js";
+import { createZoneSlider } from "./slider.js";
 
 const state = {
   data: null,
@@ -11,80 +21,108 @@ const state = {
   scene: null,
   camera: null,
   controls: null,
-  zones: {},
-  activeZone: 1,
+  sphere: null,
+  slider: null,
+  fluid: null,
   audio: createHeartbeatAudio(),
-  focus: null,
   clock: new THREE.Clock(),
-  dragDist: 0,
+  zone: 1,
+  avgBpm: 118,
+  zoneTween: null,
 };
 
 async function boot() {
   const canvas = document.getElementById("c");
-  const status = document.getElementById("load-status");
+  const bootEl = document.getElementById("boot");
 
   try {
-    status.textContent = "Loading hike data…";
     state.data = await loadHikeData();
-    document.getElementById("title").textContent = shortTitle(state.data.title);
-
+    state.fluid = createFluidBackground(document.getElementById("bg"));
     setupThree(canvas);
-    state.focus = createFocusController({
-      camera: state.camera,
-      controls: state.controls,
-    });
-    wireUi();
-    wirePointer(canvas);
 
-    status.textContent = "Building toroidal zones…";
-    await buildZones((done, total) => {
-      status.textContent = `Placing media… ${done}/${total}`;
+    state.slider = createZoneSlider(document.getElementById("slider-root"), {
+      startZone: 1,
+      onChange: (zone) => transitionToZone(zone),
+      onAudioToggle: async (btn) => {
+        if (state.audio.enabled) {
+          state.audio.stop();
+          btn.classList.remove("is-live");
+        } else {
+          state.audio.setBpm(state.avgBpm);
+          state.audio.setIntensity(zoneConfig(state.zone).audio);
+          await state.audio.start(state.clock.elapsedTime);
+          resumeActiveVideos(state.sphere);
+          btn.classList.add("is-live");
+        }
+      },
     });
 
-    setActiveZone(1, { silent: true });
-    document.getElementById("boot").classList.add("is-done");
-    animate();
+    // Sblocca video muti al primo gesto
+    const unlock = () => {
+      resumeActiveVideos(state.sphere);
+      canvas.removeEventListener("pointerdown", unlock);
+    };
+    canvas.addEventListener("pointerdown", unlock);
+
+    const capped = {
+      ...state.data,
+      zones: {
+        1: { ...state.data.zones[1], media: state.data.zones[1].media.slice(0, 52) },
+        2: { ...state.data.zones[2], media: state.data.zones[2].media.slice(0, 40) },
+        3: state.data.zones[3],
+        4: state.data.zones[4],
+      },
+    };
+
+    state.sphere = await createImmersiveSphere(capped, {
+      maxPerZone: 52,
+      onProgress: (done, total) => {
+        bootEl.dataset.progress = String(Math.round((done / total) * 100));
+      },
+    });
+    state.scene.add(state.sphere.group);
+    applyZoneInstant(1);
+
+    bootEl.classList.remove("is-error");
+    bootEl.classList.add("is-done");
   } catch (err) {
     console.error(err);
-    status.textContent = err.message || "Failed to start";
+    bootEl.dataset.error = err?.message || String(err);
+    bootEl.classList.add("is-error");
+    return;
   }
-}
 
-function shortTitle(title) {
-  if (!title) return "Rifugio Lagazuoi";
-  if (title.includes("Lagazuoi")) return "Rifugio Lagazuoi";
-  return title.split(" - ")[0];
+  animate();
 }
 
 function setupThree(canvas) {
   const renderer = new THREE.WebGLRenderer({
     canvas,
     antialias: true,
-    alpha: false,
+    alpha: true,
     powerPreference: "high-performance",
   });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.6));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.setClearColor(0x000000, 0);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color("#f6f4ef");
-  scene.fog = new THREE.Fog("#f6f4ef", 55, 120);
 
-  const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 300);
-  camera.position.set(0, 16, 42);
+  const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.05, 300);
+  camera.position.set(0, 10, 52);
 
   const controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true;
-  controls.dampingFactor = 0.06;
-  controls.minDistance = 12;
-  controls.maxDistance = 85;
-  controls.maxPolarAngle = Math.PI * 0.49;
+  controls.dampingFactor = 0.055;
+  controls.enablePan = true;
+  controls.enableZoom = true;
+  controls.minDistance = 0.4;
+  controls.maxDistance = 100;
+  controls.minPolarAngle = 0;
+  controls.maxPolarAngle = Math.PI;
   controls.target.set(0, 0, 0);
   controls.update();
-
-  // Soft fill so tinted unlit media still read well on light bg
-  scene.add(new THREE.AmbientLight(0xffffff, 0.9));
 
   state.renderer = renderer;
   state.scene = scene;
@@ -98,135 +136,111 @@ function setupThree(canvas) {
   });
 }
 
-async function buildZones(onProgress) {
-  const list = zoneList(state.data);
-  let done = 0;
-  for (const zone of list) {
-    const maxMedia = zone.id === 1 ? 96 : 120;
-    const torus = await createZoneTorus(zone, { maxMedia });
-    state.scene.add(torus.group);
-    state.zones[zone.id] = torus;
-    done += 1;
-    onProgress?.(done, list.length);
-  }
+function applyZoneInstant(zoneId) {
+  const zone = state.data.zones[zoneId];
+  const cfg = zoneConfig(zoneId);
+  state.zone = zoneId;
+  state.avgBpm = zone.avgBpm;
+
+  setActiveZoneMedia(state.sphere, zoneId);
+  state.sphere.pulseDepth = cfg.pulseDepth;
+  state.sphere.groupPulse = cfg.groupPulse;
+  applyDensity(state.sphere, { radius: cfg.radius, coverage: cfg.coverage });
+  applyShaderGrade(state.sphere, cfg.saturation, cfg.contrast);
+  applyMediaOpacity(state.sphere, 1);
+  state.fluid?.setPalette({ a: cfg.bgA, b: cfg.bgB, c: cfg.bgC });
+  state.audio.setBpm(state.avgBpm);
+  state.audio.setIntensity(cfg.audio);
+  document.documentElement.style.setProperty("--accent", cfg.accent);
 }
 
-function setActiveZone(id, { silent = false } = {}) {
-  const switchZone = () => {
-    state.activeZone = id;
-    Object.values(state.zones).forEach((z) => {
-      z.group.visible = z.id === id;
-    });
+/** Transizione fluida — la camera non viene mai resettata. */
+function transitionToZone(zoneId) {
+  if (zoneId === state.zone) return;
 
-    const zone = state.data.zones[id];
-    state.audio.setBpm(zone.avgBpm);
+  const from = zoneConfig(state.zone);
+  const to = zoneConfig(zoneId);
+  const zone = state.data.zones[zoneId];
 
-    document.querySelectorAll("[data-zone]").forEach((btn) => {
-      btn.classList.toggle("is-active", Number(btn.dataset.zone) === id);
-    });
-    document.getElementById("zone-label").textContent = zone.label;
-    document.getElementById("zone-range").textContent = zone.range;
-    document.getElementById("zone-bpm").textContent = `${Math.round(zone.avgBpm)} BPM`;
-    document.getElementById("zone-count").textContent = `${Math.min(zone.media.length, id === 1 ? 96 : 120)} media`;
+  if (state.zoneTween && typeof gsap !== "undefined") state.zoneTween.kill();
 
-    if (!silent) {
-      // Gentle camera reset outward for the toroid
-      gsap?.to?.(state.camera.position, {
-        x: 0,
-        y: 16,
-        z: 42,
-        duration: 0.9,
-        ease: "power2.inOut",
-        onUpdate: () => state.controls.update(),
-      });
-      state.controls.target.set(0, 0, 0);
-    }
+  state.zone = zoneId;
+  state.avgBpm = zone.avgBpm;
+  state.sphere.pulseDepth = to.pulseDepth;
+  state.sphere.groupPulse = to.groupPulse;
+  state.audio.setBpm(state.avgBpm);
+  state.audio.setIntensity(to.audio);
+  state.fluid?.setPalette({ a: to.bgA, b: to.bgB, c: to.bgC });
+  document.documentElement.style.setProperty("--accent", to.accent);
+
+  const proxy = {
+    radius: from.radius,
+    coverage: from.coverage,
+    saturation: from.saturation,
+    contrast: from.contrast,
+    opacity: 1,
   };
 
-  if (state.focus?.focused) {
-    state.focus.unfocus().then(switchZone);
-  } else {
-    switchZone();
+  const applyProxy = () => {
+    applyDensity(state.sphere, { radius: proxy.radius, coverage: proxy.coverage });
+    applyShaderGrade(state.sphere, proxy.saturation, proxy.contrast);
+    applyMediaOpacity(state.sphere, proxy.opacity);
+  };
+
+  if (typeof gsap === "undefined") {
+    setActiveZoneMedia(state.sphere, zoneId);
+    Object.assign(proxy, {
+      radius: to.radius,
+      coverage: to.coverage,
+      saturation: to.saturation,
+      contrast: to.contrast,
+      opacity: 1,
+    });
+    applyProxy();
+    return;
   }
-}
 
-function wireUi() {
-  const nav = document.getElementById("zone-nav");
-  nav.innerHTML = "";
-  zoneList(state.data).forEach((zone) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "zone-btn";
-    btn.dataset.zone = String(zone.id);
-    btn.style.setProperty("--zone", zone.tint);
-    btn.innerHTML = `<span class="dot"></span><span>${zone.label}</span><small>${Math.round(zone.avgBpm)} bpm</small>`;
-    btn.addEventListener("click", () => setActiveZone(zone.id));
-    nav.appendChild(btn);
+  const tl = gsap.timeline({
+    onComplete: () => {
+      state.zoneTween = null;
+    },
+  });
+  state.zoneTween = tl;
+
+  tl.to(proxy, {
+    opacity: 0,
+    duration: 0.32,
+    ease: "power1.inOut",
+    onUpdate: () => applyMediaOpacity(state.sphere, proxy.opacity),
   });
 
-  const audioBtn = document.getElementById("btn-audio");
-  audioBtn.addEventListener("click", async () => {
-    if (state.audio.enabled) {
-      state.audio.stop();
-      audioBtn.classList.remove("is-live");
-      audioBtn.textContent = "Enable heartbeat";
-    } else {
-      state.audio.setBpm(state.data.zones[state.activeZone].avgBpm);
-      await state.audio.start();
-      audioBtn.classList.add("is-live");
-      audioBtn.textContent = "Mute heartbeat";
-    }
-  });
-}
-
-function wirePointer(canvas) {
-  let downX = 0;
-  let downY = 0;
-
-  canvas.addEventListener("pointerdown", (e) => {
-    downX = e.clientX;
-    downY = e.clientY;
-    state.dragDist = 0;
+  tl.add(() => {
+    setActiveZoneMedia(state.sphere, zoneId);
+    proxy.radius = from.radius;
+    proxy.coverage = from.coverage;
+    proxy.saturation = from.saturation;
+    proxy.contrast = from.contrast;
+    proxy.opacity = 0;
+    applyProxy();
+    resumeActiveVideos(state.sphere);
   });
 
-  canvas.addEventListener("pointermove", (e) => {
-    state.dragDist = Math.hypot(e.clientX - downX, e.clientY - downY);
-  });
-
-  canvas.addEventListener("pointerup", (e) => {
-    if (state.dragDist > 6 || state.focus.animating) return;
-    const zone = state.zones[state.activeZone];
-    if (!zone) return;
-
-    const hit = state.focus.pick(zone.mediaMeshes, e);
-
-    if (state.focus.focused) {
-      if (hit && hit === state.focus.focused) return;
-      if (hit) {
-        // Swap to another asset
-        state.focus.focus(hit);
-      } else {
-        // Click background → return home
-        state.focus.unfocus();
-      }
-      return;
-    }
-
-    if (hit) state.focus.focus(hit);
+  tl.to(proxy, {
+    radius: to.radius,
+    coverage: to.coverage,
+    saturation: to.saturation,
+    contrast: to.contrast,
+    opacity: 1,
+    duration: 1.25,
+    ease: "power2.inOut",
+    onUpdate: applyProxy,
   });
 }
 
 function animate() {
   requestAnimationFrame(animate);
-  const delta = state.clock.getDelta();
-  const elapsed = state.clock.elapsedTime;
-  const active = state.zones[state.activeZone];
-  const focused = state.focus?.focused || null;
-
-  applySpin(active, delta, Boolean(focused));
-  const beat = applyPulse(active, elapsed, focused);
-  document.documentElement.style.setProperty("--beat", String(beat));
-
+  const transport = state.audio.getSyncTime(state.clock.elapsedTime);
+  applyHeartbeat(state.sphere, transport, state.avgBpm);
   state.controls.update();
   state.renderer.render(state.scene, state.camera);
 }

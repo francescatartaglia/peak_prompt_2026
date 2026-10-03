@@ -3,13 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Lagazuoi — Heartbeat Toroids</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
+    <title>Lagazuoi</title>
     <link rel="stylesheet" href="style.css" />
     <script type="importmap">
       {
@@ -21,37 +15,12 @@
     </script>
   </head>
   <body>
+    <canvas id="bg" aria-hidden="true"></canvas>
     <canvas id="c"></canvas>
 
-    <div class="hud">
-      <header class="hud-top">
-        <div>
-          <p class="brand">Peak Prompt 2026</p>
-          <h1 id="title">Rifugio Lagazuoi</h1>
-          <p class="lede">Media arranged as heart-rate toroids. Drag to orbit · scroll to zoom · click a frame to bring it forward.</p>
-        </div>
-        <button type="button" id="btn-audio" class="audio-btn">Enable heartbeat</button>
-      </header>
+    <div id="slider-root" class="slider-root"></div>
 
-      <aside class="hud-meta">
-        <p class="eyebrow" id="zone-label">Zone 1</p>
-        <p id="zone-range" class="mute">—</p>
-        <p id="zone-bpm" class="bpm">—</p>
-        <p id="zone-count" class="mute">—</p>
-      </aside>
-
-      <nav id="zone-nav" class="zone-nav" aria-label="Heart rate zones"></nav>
-    </div>
-
-    <div id="boot" class="boot">
-      <div>
-        <p class="brand">Peak Prompt 2026</p>
-        <h2>Heartbeat toroids</h2>
-        <p id="load-status" class="mute">Starting…</p>
-      </div>
-    </div>
-
-    <p class="hint">Classic map: <a href="map.html">map.html</a></p>
+    <div id="boot" class="boot" aria-hidden="true"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
     <script type="module" src="js/immersive/main.js"></script>
