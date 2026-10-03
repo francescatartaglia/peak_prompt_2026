@@ -1,0 +1,16 @@
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Media assets (photos, video, audio)
+assets/media/
+
+# Apple Health export (very large + personal)
+assets/apple_health_export/
+
+# Optional local caches / env
+.env
+.env.*
+*.log
+.cache/
+node_modules/
