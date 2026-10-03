@@ -18,13 +18,12 @@ HR_CSV = ROOT / "data" / "hiking_2026-10-02_heart_rate.csv"
 MEDIA_JSON = ROOT / "data" / "timeline.json"
 OUT = ROOT / "data" / "hike_viz.json"
 
-# Zone rules (inclusive bounds as specified)
+# Zone rules (4 zones; former 4+5 merged into Zone 4)
 # Zone 1: < 136
 # Zone 2: 137–150
 # Zone 3: 151–164
-# Zone 4: 165–177
-# Zone 5: 178+
-# bpm == 136 treated as Zone 1 (closest to "< 136" boundary)
+# Zone 4: 165+
+# bpm == 136 treated as Zone 1
 
 
 def parse_iso(value: str) -> datetime:
@@ -38,25 +37,44 @@ def parse_iso(value: str) -> datetime:
 def zone_for_bpm(bpm: Optional[float]) -> Optional[int]:
     if bpm is None:
         return None
-    if bpm < 136:
-        return 1
     if bpm <= 136:
         return 1
     if bpm <= 150:
         return 2
     if bpm <= 164:
         return 3
-    if bpm <= 177:
-        return 4
-    return 5
+    return 4
 
 
 ZONE_META = {
-    1: {"id": 1, "label": "Zone 1", "range": "< 136 bpm", "color": "#3b82f6"},
-    2: {"id": 2, "label": "Zone 2", "range": "137–150 bpm", "color": "#84cc16"},
-    3: {"id": 3, "label": "Zone 3", "range": "151–164 bpm", "color": "#eab308"},
-    4: {"id": 4, "label": "Zone 4", "range": "165–177 bpm", "color": "#f97316"},
-    5: {"id": 5, "label": "Zone 5", "range": "178+ bpm", "color": "#9f1239"},
+    1: {
+        "id": 1,
+        "label": "Zone 1",
+        "range": "< 136 bpm",
+        "color": "#3b82f6",
+        "tint": "#4aa3ff",
+    },
+    2: {
+        "id": 2,
+        "label": "Zone 2",
+        "range": "137–150 bpm",
+        "color": "#a3e635",
+        "tint": "#c8e86a",
+    },
+    3: {
+        "id": 3,
+        "label": "Zone 3",
+        "range": "151–164 bpm",
+        "color": "#f97316",
+        "tint": "#ff9a4d",
+    },
+    4: {
+        "id": 4,
+        "label": "Zone 4",
+        "range": "165+ bpm",
+        "color": "#e11d48",
+        "tint": "#ff2d55",
+    },
 }
 
 
@@ -166,7 +184,7 @@ def build_track(points: List[dict], hr: List[Tuple[datetime, float]]) -> List[di
 
 def zone_time_stats(track: List[dict]) -> dict:
     """Estimate seconds spent in each zone from consecutive track segments."""
-    totals = {1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0, 5: 0.0}
+    totals = {1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0}
     for i in range(1, len(track)):
         a, b = track[i - 1], track[i]
         dt = (
@@ -182,8 +200,29 @@ def zone_time_stats(track: List[dict]) -> dict:
             "minutes": round(totals[z] / 60, 1),
             "percent": round(100 * totals[z] / max(sum(totals.values()), 1), 1),
         }
-        for z in range(1, 6)
+        for z in range(1, 5)
     }
+
+
+def media_zone_stats(media: List[dict]) -> dict:
+    """Per-zone media counts and average BPM (for immersive pulse/audio)."""
+    out = {}
+    for z in range(1, 5):
+        items = [m for m in media if m.get("zone") == z]
+        bpms = [m["bpm"] for m in items if m.get("bpm") is not None]
+        out[str(z)] = {
+            **ZONE_META[z],
+            "mediaCount": len(items),
+            "avgBpm": round(sum(bpms) / len(bpms), 1) if bpms else None,
+            "minBpm": round(min(bpms), 1) if bpms else None,
+            "maxBpm": round(max(bpms), 1) if bpms else None,
+            "byKind": {
+                "image": sum(1 for m in items if m["kind"] == "image"),
+                "video": sum(1 for m in items if m["kind"] == "video"),
+                "audio": sum(1 for m in items if m["kind"] == "audio"),
+            },
+        }
+    return out
 
 
 def load_media(path: Path, track: List[dict]) -> List[dict]:
@@ -272,6 +311,7 @@ def main() -> None:
             "hr_samples": len(hr),
         },
         "zoneStats": zone_time_stats(track),
+        "mediaZoneStats": media_zone_stats(media),
         "track": track,
         "media": media,
     }
@@ -287,7 +327,11 @@ def main() -> None:
         f"avg {payload['stats']['hr_avg']}"
     )
     for z, info in payload["zoneStats"].items():
-        print(f"  Zone {z}: {info['minutes']} min ({info['percent']}%)")
+        mz = payload["mediaZoneStats"][z]
+        print(
+            f"  Zone {z}: {info['minutes']} min ({info['percent']}%) · "
+            f"{mz['mediaCount']} media · avg BPM {mz['avgBpm']}"
+        )
 
 
 if __name__ == "__main__":

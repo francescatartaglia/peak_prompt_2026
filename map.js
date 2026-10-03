@@ -228,7 +228,7 @@ function renderGallery(data) {
     `${media.length} items · ${total.image} photos · ${total.video} videos · ${total.audio} audio`;
 
   root.innerHTML = "";
-  for (let z = 1; z <= 5; z += 1) {
+  for (let z = 1; z <= 4; z += 1) {
     const zone = data.zones[z];
     const items = media
       .filter((a) => a.zone === z)
