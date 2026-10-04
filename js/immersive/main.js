@@ -17,7 +17,6 @@ import {
 import { createZoneAmbient } from "./zoneAmbient.js";
 import { createHudSidebar } from "./hudSidebar.js";
 import { createMediaHover } from "./mediaHover.js";
-import { armTypeSounds, playTypeClick } from "./typeSounds.js";
 import { morphTextInPlace } from "./textMorph.js";
 import { createAutoplayController, buildChronoPlaylist } from "./autoplay.js";
 
@@ -228,9 +227,7 @@ async function boot() {
 
 function gateMorph(el, text, opts = {}) {
   return morphTextInPlace(el, text, {
-    click: true,
-    clickSound: playTypeClick,
-    clickUniform: true,
+    click: false,
     ...opts,
   });
 }
@@ -293,17 +290,8 @@ function bindStartGate() {
   });
 
   const runSequence = async () => {
-    armTypeSounds();
-
-    // Stessa altezza/volume; ritmi leggermente diversi per blocco
-    const gateTone = { clickGain: 0.34, clickUniform: true };
-
     if (title) {
       await gateMorph(title, fullText, {
-        ...gateTone,
-        clickEvery: 1,
-        clickJitter: 0.22,
-        clickSkip: 0.06,
         slowLock: 94,
         fastLock: 60,
         scrambleMs: 20,
@@ -314,10 +302,6 @@ function bindStartGate() {
     await new Promise((r) => setTimeout(r, 272));
     btn.classList.add("is-in");
     await gateMorph(btn, ctaText, {
-      ...gateTone,
-      clickEvery: 1,
-      clickJitter: 0.4,
-      clickSkip: 0.1,
       slowLock: 95,
       fastLock: 68,
       scrambleMs: 24,
@@ -338,14 +322,9 @@ function bindStartGate() {
       line.style.minWidth = `${(lines[i] || "").length}ch`;
     });
     meta?.classList.add("is-in");
-    // Info: stesso timbro; ritmo audio molto più lento (click radi, morph invariato)
     await Promise.all(
       metaLines.map((line, i) =>
         gateMorph(line, line.dataset.final || lines[i] || "", {
-          ...gateTone,
-          clickEvery: 8,
-          clickJitter: 0.35,
-          clickSkip: 0.05,
           slowLock: 95,
           fastLock: 68,
           scrambleMs: 24,
