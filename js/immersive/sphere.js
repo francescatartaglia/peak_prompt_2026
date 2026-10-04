@@ -3,11 +3,15 @@
  */
 
 import * as THREE from "three";
-import { createMediaMaterial, setShaderGrade, setShaderOpacity } from "./mediaShader.js";
+import {
+  createMediaMaterial,
+  setShaderGrade,
+  setShaderOpacity,
+  tickMediaShaderTime,
+} from "./mediaShader.js";
 import {
   loadOptimizedImageTexture,
   createOptimizedVideo,
-  makePlaceholderTexture,
 } from "./textures.js";
 import { contractionEnvelope } from "./heartbeat.js";
 
@@ -18,7 +22,7 @@ const SEG_H = 16;
  * solo renderOrder + polygonOffset (niente offset radiale).
  */
 
-/** Fibonacci sphere: punti quasi equidistribuiti sulla sfera unitaria. */
+/** Fibonacci sphere: copertura quasi uniforme sulla sfera unitaria. */
 function fibonacciSphere(count) {
   const n = Math.max(count, 1);
   const golden = Math.PI * (3 - Math.sqrt(5));
@@ -33,8 +37,8 @@ function fibonacciSphere(count) {
 }
 
 /**
- * Farthest-point sampling: sceglie `k` punti il più omogenei possibile
- * da un insieme denso di candidati (ideale per poche foto, es. zona 4).
+ * Farthest-point sampling: sottoinsieme omogeneo da candidati densi
+ * (aspetto casuale ma senza buchi evidenti).
  */
 function farthestPointSample(candidates, k) {
   const n = candidates.length;
@@ -42,15 +46,8 @@ function farthestPointSample(candidates, k) {
   const selected = [];
   const minDist = new Float64Array(n).fill(Infinity);
 
-  // Start deterministico: vicino al polo “equatoriale” (+Z)
-  let start = 0;
-  let bestZ = -Infinity;
-  for (let i = 0; i < n; i += 1) {
-    if (candidates[i].z > bestZ) {
-      bestZ = candidates[i].z;
-      start = i;
-    }
-  }
+  // Start semi-casuale ma stabile per sessione
+  let start = Math.floor(Math.random() * n);
   selected.push(candidates[start].clone());
 
   for (let s = 1; s < count; s += 1) {
@@ -70,13 +67,23 @@ function farthestPointSample(candidates, k) {
   return selected;
 }
 
-/** Leggera repulsione sulla sfera per chiudere i residui di clustering. */
-function relaxOnSphere(dirs, iterations = 10) {
+/** Piccola agitazione organica, poi repulsione per richiudere i buchi. */
+function jitterDirs(dirs, amount = 0.14) {
+  for (const d of dirs) {
+    d.x += (Math.random() - 0.5) * amount;
+    d.y += (Math.random() - 0.5) * amount;
+    d.z += (Math.random() - 0.5) * amount;
+    d.normalize();
+  }
+  return dirs;
+}
+
+function relaxOnSphere(dirs, iterations = 12) {
   const n = dirs.length;
   if (n < 3) return dirs;
   const forces = Array.from({ length: n }, () => new THREE.Vector3());
   const away = new THREE.Vector3();
-  const minAng = Math.sqrt((4 * Math.PI) / n) * 0.92;
+  const minAng = Math.sqrt((4 * Math.PI) / n) * 0.98;
 
   for (let it = 0; it < iterations; it += 1) {
     for (let i = 0; i < n; i += 1) forces[i].set(0, 0, 0);
@@ -91,7 +98,7 @@ function relaxOnSphere(dirs, iterations = 10) {
         forces[j].addScaledVector(away, -push);
       }
     }
-    const t = 0.4 * (1 - it / iterations);
+    const t = 0.38 * (1 - it / iterations);
     for (let i = 0; i < n; i += 1) {
       dirs[i].addScaledVector(forces[i], t).normalize();
     }
@@ -99,13 +106,14 @@ function relaxOnSphere(dirs, iterations = 10) {
   return dirs;
 }
 
-/** Campioni omogenei sulla sfera (buoni anche con poche foto). */
+/** Campioni casuali ma omogenei sulle pareti della sfera. */
 export function sphereSamples(count, radius) {
   const n = Math.max(count, 1);
-  const candidateN = Math.max(220, n * 48);
+  const candidateN = Math.max(260, n * 56);
   const candidates = fibonacciSphere(candidateN);
   const picked = farthestPointSample(candidates, n);
-  relaxOnSphere(picked, n <= 16 ? 18 : 10);
+  jitterDirs(picked, 0.16);
+  relaxOnSphere(picked, n <= 16 ? 18 : 12);
   return picked.map((p) => p.multiplyScalar(radius));
 }
 
@@ -156,12 +164,25 @@ export function bendGeometry(geo, radius, scale = 1) {
 }
 
 const _radial = new THREE.Vector3();
-const _outward = new THREE.Vector3(0, 0, 1);
+const _up = new THREE.Vector3();
+const _right = new THREE.Vector3();
+const _worldUp = new THREE.Vector3(0, 1, 0);
+const _basis = new THREE.Matrix4();
 
-/** Orienta il pannello con +Z verso l’esterno (sopra la sfera). */
+/**
+ * +Z verso l’esterno, +Y allineata al “su” del mondo (foto dritte, senza twist).
+ */
 function orientOutward(mesh, direction) {
   _radial.copy(direction).normalize();
-  mesh.quaternion.setFromUnitVectors(_outward, _radial);
+  _up.copy(_worldUp).addScaledVector(_radial, -_worldUp.dot(_radial));
+  if (_up.lengthSq() < 1e-8) {
+    _up.set(0, 0, 1).addScaledVector(_radial, -_radial.z);
+  }
+  _up.normalize();
+  _right.crossVectors(_up, _radial).normalize();
+  _up.crossVectors(_radial, _right).normalize();
+  _basis.makeBasis(_right, _up, _radial);
+  mesh.quaternion.setFromRotationMatrix(_basis);
 }
 
 async function createMediaPanel(asset) {
@@ -175,7 +196,8 @@ async function createMediaPanel(asset) {
     packed = await loadOptimizedImageTexture(asset.path);
   }
 
-  if (!packed) packed = makePlaceholderTexture(asset.kind);
+  // Niente placeholder: media assenti non compaiono come riquadri staccati
+  if (!packed) return null;
 
   const aspect = Math.min(Math.max(packed.aspect || 1.25, 0.65), 1.85);
   const baseH = 2.2;
@@ -201,10 +223,6 @@ export async function createImmersiveSphere(data, { maxPerZone = 64, onProgress 
   const group = new THREE.Group();
   group.name = "immersive-sphere";
 
-  // Wireframe denso: la densità locale segue le rientranze della bolla
-  const dotWire = createDotWireframe(28000);
-  group.add(dotWire);
-
   const byZone = { 1: [], 2: [], 3: [], 4: [] };
   const allMeshes = [];
   const jobs = [];
@@ -221,6 +239,7 @@ export async function createImmersiveSphere(data, { maxPerZone = 64, onProgress 
     // eslint-disable-next-line no-await-in-loop
     const panels = await Promise.all(slice.map((j) => createMediaPanel(j.asset)));
     panels.forEach((mesh, idx) => {
+      if (!mesh) return;
       const zoneId = slice[idx].id;
       group.add(mesh);
       byZone[zoneId].push(mesh);
@@ -232,16 +251,16 @@ export async function createImmersiveSphere(data, { maxPerZone = 64, onProgress 
 
   return {
     group,
-    dotWire,
     byZone,
     allMeshes,
     activeMeshes: [],
     radius: 56,
     coverage: 0.36,
-    saturation: 0.42,
-    contrast: 0.82,
-    pulseDepth: 0.06,
-    groupPulse: 0.03,
+    saturation: 0.38,
+    contrast: 1.12,
+    brightness: 1.42,
+    pulseDepth: 0.12,
+    groupPulse: 0.045,
   };
 }
 
@@ -508,16 +527,16 @@ export function setActiveZoneMedia(sphere, zoneId) {
   sphere.activeMeshes = active;
   layoutMeshes(active, sphere.radius);
   applyCoverageScale(sphere);
-  updateWireframe(sphere);
   return active;
 }
 
-export function applyDensity(sphere, { radius, coverage }) {
+export function applyDensity(sphere, { radius, coverage, relayout = false } = {}) {
   sphere.radius = radius;
   sphere.coverage = coverage;
-  layoutMeshes(sphere.activeMeshes, radius);
+  // Relayout solo se richiesto: altrimenti le foto restano al posto
+  // (evita il “salto” casuale durante le transizioni zona).
+  if (relayout) layoutMeshes(sphere.activeMeshes, radius);
   applyCoverageScale(sphere);
-  updateWireframe(sphere);
 }
 
 export function applyShaderGrade(sphere, saturation, contrast, brightness = 1) {
@@ -538,14 +557,14 @@ export function applyMediaOpacity(sphere, opacity) {
 export function applyHeartbeat(sphere, transportTime, bpm) {
   if (!sphere) return 0;
   const { contraction } = contractionEnvelope(transportTime, bpm);
-  sphere.group.scale.setScalar(1 - contraction * (sphere.groupPulse ?? 0.04));
-  // Pulse leggero sul mesh.scale (la curvatura resta corretta a scale≈1)
-  const pulse = 1 - contraction * sphere.pulseDepth;
+  // Niente scale sul group (evita scatti dopo lo zoom): solo i pannelli pulsan
+  sphere.group.scale.setScalar(1);
+  const depth = (sphere.pulseDepth ?? 0.14) * 0.85;
+  const pulse = 1 - contraction * depth;
   for (const mesh of sphere.activeMeshes) {
     mesh.scale.setScalar(pulse);
+    tickMediaShaderTime(mesh.material, transportTime);
   }
-  // Wireframe: scosse sfalsate a ogni battito
-  applyWireframePulse(sphere, contraction, transportTime);
   return contraction;
 }
 

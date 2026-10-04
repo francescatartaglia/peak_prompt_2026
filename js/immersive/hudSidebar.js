@@ -1,0 +1,314 @@
+/**
+ * Medical DICOM-style HUD sidebar (VT323):
+ * GPX track with zone highlight, BPM zone selector, sound + heartbeat volumes.
+ */
+
+import { ZONE_ORDER, zoneConfig, zoneFromBpm } from "./zones.js";
+
+function projectTrack(track) {
+  if (!track?.length) return [];
+  let minLat = Infinity;
+  let maxLat = -Infinity;
+  let minLon = Infinity;
+  let maxLon = -Infinity;
+  for (const p of track) {
+    minLat = Math.min(minLat, p.lat);
+    maxLat = Math.max(maxLat, p.lat);
+    minLon = Math.min(minLon, p.lon);
+    maxLon = Math.max(maxLon, p.lon);
+  }
+  const dLat = Math.max(maxLat - minLat, 1e-6);
+  const dLon = Math.max(maxLon - minLon, 1e-6);
+  const pad = 0.08;
+  return track.map((p) => {
+    const nx = (p.lon - minLon) / dLon;
+    const ny = (p.lat - minLat) / dLat;
+    const bpm = Number(p.bpm);
+    return {
+      x: pad + nx * (1 - pad * 2),
+      y: pad + (1 - ny) * (1 - pad * 2),
+      zone: Number.isFinite(bpm) ? zoneFromBpm(bpm) : Number(p.zone) || 1,
+      bpm: Number.isFinite(bpm) ? bpm : 0,
+      time: p.time,
+    };
+  });
+}
+
+function bindHorizontalSlider(el, { value, onChange, valueEl } = {}) {
+  let v = Math.min(1, Math.max(0, Number(value) || 0));
+  const fill = el?.querySelector("[data-fill]");
+  const thumb = el?.querySelector("[data-thumb]");
+  const readout =
+    valueEl ||
+    el?.closest(".hud-control")?.querySelector("[data-value]") ||
+    null;
+  let dragging = false;
+
+  function paint() {
+    const pct = `${(v * 100).toFixed(1)}%`;
+    el.style.setProperty("--pct", pct);
+    if (fill) fill.style.width = pct;
+    if (thumb) thumb.style.left = pct;
+    if (readout) {
+      readout.textContent = String(Math.round(v * 100));
+    }
+  }
+
+  function set(next, { silent = false } = {}) {
+    v = Math.min(1, Math.max(0, Number(next) || 0));
+    paint();
+    if (!silent) onChange?.(v);
+  }
+
+  function fromX(clientX) {
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0) return v;
+    return Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+  }
+
+  el.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragging = true;
+    el.setPointerCapture?.(e.pointerId);
+    set(fromX(e.clientX));
+  });
+  el.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    e.preventDefault();
+    set(fromX(e.clientX));
+  });
+  el.addEventListener("pointerup", () => {
+    dragging = false;
+  });
+  el.addEventListener("pointercancel", () => {
+    dragging = false;
+  });
+
+  paint();
+  return { get: () => v, set };
+}
+
+/**
+ * @param {HTMLElement} root
+ * @param {{ track?: any[], startZone?: number, soundVol?: number, heartVol?: number, onZoneChange?: Function, onSoundChange?: Function, onHeartChange?: Function, title?: string }} opts
+ */
+export function createHudSidebar(
+  root,
+  {
+    track = [],
+    startZone = 1,
+    soundVol = 0.72,
+    heartVol = 0.55,
+    onZoneChange,
+    onSoundChange,
+    onHeartChange,
+    title = "PEAK PROMPT",
+  } = {}
+) {
+  const pts = projectTrack(track);
+  let zone = startZone;
+
+  root.innerHTML = `
+    <aside class="hud" aria-label="Cardiac CT diagnostics">
+      <header class="hud-head">
+        <div class="hud-title">${title}</div>
+        <div class="hud-sub">TAC CARDIACA · DICOM</div>
+        <div class="hud-meta">
+          <span>EX: 6868</span>
+          <span>SE: 6</span>
+          <span>IM: 51</span>
+        </div>
+      </header>
+
+      <section class="hud-track-wrap" aria-label="GPX heart-rate track">
+        <div class="hud-track-label">ROUTE / HR MAP</div>
+        <canvas class="hud-track" width="280" height="420" aria-hidden="true"></canvas>
+        <div class="hud-orient">
+          <span>A</span><span>P</span><span>R</span><span>L</span>
+        </div>
+      </section>
+
+      <section class="hud-controls">
+        <div class="hud-control">
+          <div class="hud-control-row">
+            <span class="hud-label">BPM / ZONE</span>
+            <span class="hud-readout hud-readout--zone" data-zone-readout>ZONE 1</span>
+          </div>
+          <div class="hud-zone-slider" data-zone-slider>
+            <div class="hud-h-fill hud-h-fill--zone" data-zone-fill></div>
+            <div class="hud-zone-marks">
+              ${ZONE_ORDER.map(
+                (id) =>
+                  `<button type="button" class="hud-zone-mark" data-zone="${id}" style="--z:${zoneConfig(id).accent}" aria-label="${zoneConfig(id).rangeLabel}"></button>`
+              ).join("")}
+            </div>
+            <input type="range" min="1" max="4" step="1" value="${startZone}" data-zone-range aria-label="Heart rate zone" />
+          </div>
+          <div class="hud-zone-range" data-zone-range-label>${zoneConfig(startZone).rangeLabel}</div>
+        </div>
+
+        <div class="hud-control">
+          <div class="hud-control-row">
+            <span class="hud-label">SOUND</span>
+            <span class="hud-readout" data-value data-mode="pct">${Math.round(soundVol * 100)}</span>
+          </div>
+          <div class="hud-h-slider" data-sound-slider>
+            <div class="hud-h-fill" data-fill></div>
+            <button type="button" class="hud-h-thumb" data-thumb aria-label="Sound volume"></button>
+          </div>
+        </div>
+
+        <div class="hud-control">
+          <div class="hud-control-row">
+            <span class="hud-label">HEARTBEAT</span>
+            <span class="hud-readout" data-value data-mode="pct">${Math.round(heartVol * 100)}</span>
+          </div>
+          <div class="hud-h-slider" data-heart-slider>
+            <div class="hud-h-fill" data-fill></div>
+            <button type="button" class="hud-h-thumb" data-thumb aria-label="Heartbeat volume"></button>
+          </div>
+        </div>
+      </section>
+
+      <footer class="hud-foot">
+        <span>kV 100</span>
+        <span>mA 400</span>
+        <span class="hud-ww">WW: 400 WL: 40</span>
+      </footer>
+    </aside>
+  `;
+
+  const canvas = root.querySelector(".hud-track");
+  const ctx = canvas.getContext("2d");
+  const zoneReadout = root.querySelector("[data-zone-readout]");
+  const zoneRangeLabel = root.querySelector("[data-zone-range-label]");
+  const zoneFill = root.querySelector("[data-zone-fill]");
+  const zoneRange = root.querySelector("[data-zone-range]");
+
+  function drawTrack() {
+    if (!ctx || !canvas) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const cssW = canvas.clientWidth || 140;
+    const cssH = canvas.clientHeight || 220;
+    const w = Math.floor(cssW * dpr);
+    const h = Math.floor(cssH * dpr);
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssW, cssH);
+
+    if (pts.length < 2) {
+      ctx.fillStyle = "rgba(200,210,220,0.25)";
+      ctx.font = "14px VT323, monospace";
+      ctx.fillText("NO TRACK", 12, 24);
+      return;
+    }
+
+    const accent = zoneConfig(zone).accent;
+
+    // Dimmed full track
+    ctx.beginPath();
+    ctx.strokeStyle = "rgba(180, 190, 200, 0.28)";
+    ctx.lineWidth = 2.2;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    for (let i = 0; i < pts.length; i += 1) {
+      const x = pts[i].x * cssW;
+      const y = pts[i].y * cssH;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    // Highlight edges assigned to the selected zone (every edge maps to exactly one
+    // zone via the start point, so the full route lights up across Z1–Z4).
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 3.2;
+    ctx.shadowColor = accent;
+    ctx.shadowBlur = 8;
+    let drawing = false;
+    for (let i = 0; i < pts.length - 1; i += 1) {
+      const edgeZone = pts[i].zone;
+      const x0 = pts[i].x * cssW;
+      const y0 = pts[i].y * cssH;
+      const x1 = pts[i + 1].x * cssW;
+      const y1 = pts[i + 1].y * cssH;
+      if (edgeZone === zone) {
+        if (!drawing) {
+          ctx.beginPath();
+          ctx.moveTo(x0, y0);
+          drawing = true;
+        }
+        ctx.lineTo(x1, y1);
+      } else if (drawing) {
+        ctx.stroke();
+        drawing = false;
+      }
+    }
+    if (drawing) ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // Endpoint markers
+    const a = pts[0];
+    const b = pts[pts.length - 1];
+    ctx.fillStyle = "rgba(220,230,240,0.7)";
+    ctx.beginPath();
+    ctx.arc(a.x * cssW, a.y * cssH, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = accent;
+    ctx.beginPath();
+    ctx.arc(b.x * cssW, b.y * cssH, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function paintZone() {
+    const cfg = zoneConfig(zone);
+    const t = ((zone - 1) / 3) * 100;
+    if (zoneFill) zoneFill.style.width = `${Math.max(t, 2)}%`;
+    root.style.setProperty("--hud-accent", cfg.accent);
+    if (zoneReadout) zoneReadout.textContent = `ZONE ${zone}`;
+    if (zoneRangeLabel) zoneRangeLabel.textContent = cfg.rangeLabel || cfg.range;
+    root.querySelectorAll(".hud-zone-mark").forEach((btn) => {
+      btn.classList.toggle("is-active", Number(btn.dataset.zone) === zone);
+    });
+    drawTrack();
+  }
+
+  function setZone(next, { silent = false } = {}) {
+    zone = Math.min(4, Math.max(1, Math.round(next)));
+    if (zoneRange) zoneRange.value = String(zone);
+    paintZone();
+    if (!silent) onZoneChange?.(zone);
+  }
+
+  zoneRange?.addEventListener("input", () => setZone(Number(zoneRange.value)));
+  root.querySelectorAll(".hud-zone-mark").forEach((btn) => {
+    btn.addEventListener("click", () => setZone(Number(btn.dataset.zone)));
+  });
+
+  const soundSlider = bindHorizontalSlider(root.querySelector("[data-sound-slider]"), {
+    value: soundVol,
+    onChange: onSoundChange,
+  });
+  const heartSlider = bindHorizontalSlider(root.querySelector("[data-heart-slider]"), {
+    value: heartVol,
+    onChange: onHeartChange,
+  });
+
+  paintZone();
+  window.addEventListener("resize", drawTrack);
+
+  return {
+    getZone: () => zone,
+    setZone,
+    setSoundVolume: (v) => soundSlider.set(v, { silent: true }),
+    setHeartVolume: (v) => heartSlider.set(v, { silent: true }),
+    redrawTrack: drawTrack,
+    dispose() {
+      window.removeEventListener("resize", drawTrack);
+    },
+  };
+}

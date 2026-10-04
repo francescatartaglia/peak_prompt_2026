@@ -14,10 +14,9 @@ import {
   resumeActiveVideos,
   keepVideosPlaying,
 } from "./sphere.js";
-import { createZoneSlider } from "./slider.js";
-import { createVolumeSlider } from "./volumeSlider.js";
 import { createZoneAmbient } from "./zoneAmbient.js";
-import { createInsideControls } from "./insideControls.js";
+import { createHudSidebar } from "./hudSidebar.js";
+import { createMediaHover } from "./mediaHover.js";
 
 const state = {
   data: null,
@@ -25,11 +24,9 @@ const state = {
   scene: null,
   camera: null,
   controls: null,
-  inside: null,
   sphere: null,
-  slider: null,
-  volumeSlider: null,
-  ambientSlider: null,
+  hud: null,
+  mediaHover: null,
   ambient: createZoneAmbient(),
   fluid: null,
   audio: createHeartbeatAudio(),
@@ -38,62 +35,49 @@ const state = {
   avgBpm: 118,
   zoneTween: null,
   introTween: null,
-  /** Dopo l’intro: navigazione solo dentro la sfera */
-  insideReady: false,
+  /** Dopo l’intro: OrbitControls attivi */
+  navReady: false,
+  /** Dopo click su Start: audio + intro zoom */
+  started: false,
+  /** Risolto quando sfera + scena sono pronti */
+  ready: null,
 };
 
-/**
- * Zoom interno:
- * - min ≈ centro (dezoom massimo)
- * - max ≈ appena sotto la parete (zoom verso le foto senza uscire)
- */
-const INSIDE_CENTER_MIN = 0.15;
-/** Quanto prima della parete si ferma lo zoom (unità mondo). */
-const INSIDE_WALL_MARGIN = 14;
+/** Fine intro: camera vicino al centro. */
+const INTRO_CENTER_DIST = 2.5;
 
 async function boot() {
   const canvas = document.getElementById("c");
   const bootEl = document.getElementById("boot");
+
+  // Digita il titolo appena la pagina carica (non aspetta i media)
+  let resolveReady;
+  state.ready = new Promise((r) => {
+    resolveReady = r;
+  });
+  bindStartGate();
 
   try {
     state.data = await loadHikeData();
     state.fluid = createFluidBackground(document.getElementById("bg"));
     setupThree(canvas);
 
-    state.slider = createZoneSlider(document.getElementById("slider-root"), {
+    state.hud = createHudSidebar(document.getElementById("hud-root"), {
+      track: state.data.track || [],
       startZone: 1,
-      onChange: (zone) => transitionToZone(zone),
-    });
-
-    state.volumeSlider = createVolumeSlider(document.getElementById("volume-root"), {
-      value: state.audio.getVolume(),
-      label: "bpm",
-      ariaLabel: "Volume battito",
-      onChange: (vol) => {
+      soundVol: state.ambient.getVolume(),
+      heartVol: state.audio.getVolume(),
+      title: "PEAK PROMPT",
+      onZoneChange: (zone) => transitionToZone(zone),
+      onSoundChange: (vol) => state.ambient.setVolume(vol),
+      onHeartChange: (vol) => {
         state.audio.setVolume(vol);
-        ensureHeartbeat();
+        if (state.started) ensureHeartbeat();
       },
     });
 
-    state.ambientSlider = createVolumeSlider(document.getElementById("ambient-root"), {
-      value: state.ambient.getVolume(),
-      label: "snd",
-      ariaLabel: "Volume audio zona",
-      onChange: (vol) => state.ambient.setVolume(vol),
-    });
-
-    // Battito + ambient + video: avvio al load / gesto (policy browser)
-    ensureHeartbeat();
-    const unlock = () => {
-      ensureHeartbeat();
-      resumeActiveVideos(state.sphere);
-      syncZoneAmbient();
-    };
-    window.addEventListener("pointerdown", unlock, { once: false });
-    window.addEventListener("keydown", unlock, { once: true });
-    window.addEventListener("touchstart", unlock, { once: true, passive: true });
     document.addEventListener("visibilitychange", () => {
-      if (!document.hidden) resumeActiveVideos(state.sphere);
+      if (!document.hidden && state.started) resumeActiveVideos(state.sphere);
     });
 
     const capped = {
@@ -113,20 +97,101 @@ async function boot() {
       },
     });
     state.scene.add(state.sphere.group);
+
+    const hoverRoot = document.getElementById("media-hover-root");
+    if (hoverRoot) {
+      state.mediaHover = createMediaHover(hoverRoot, {
+        camera: state.camera,
+        domElement: canvas,
+        getMeshes: () => state.sphere?.activeMeshes || [],
+        isEnabled: () => state.started && state.navReady,
+      });
+    }
+
     applyZoneInstant(1);
-    resumeActiveVideos(state.sphere);
+    for (const mesh of state.sphere.allMeshes) {
+      mesh.userData.videoHandle?.pause();
+    }
+    // Vista esterna dietro al blur; niente audio / zoom finché non si clicca Start
+    frameWholeSphere(state.camera, state.controls, SPHERE_RADIUS);
 
     bootEl.classList.remove("is-error");
     bootEl.classList.add("is-done");
-    playIntroZoom();
+    resolveReady?.();
   } catch (err) {
     console.error(err);
     bootEl.dataset.error = err?.message || String(err);
     bootEl.classList.add("is-error");
+    resolveReady?.();
     return;
   }
 
   animate();
+}
+
+/** Splash: titolo digitato al load, subito dopo CTA → audio + zoom. */
+function bindStartGate() {
+  const gate = document.getElementById("gate");
+  const btn = document.getElementById("gate-start");
+  const title = document.getElementById("gate-title");
+  if (!btn || !gate || gate.dataset.bound === "1") return;
+  gate.dataset.bound = "1";
+
+  const fullText =
+    title?.getAttribute("aria-label") ||
+    title?.textContent?.trim() ||
+    "EVERY PEAK HAS ITS OWN BEAT";
+
+  if (title) {
+    title.textContent = "";
+    title.classList.add("is-typing");
+    let i = 0;
+    const type = () => {
+      if (i < fullText.length) {
+        i += 1;
+        title.textContent = fullText.slice(0, i);
+        // Ultima lettera: cursore via nello stesso frame
+        if (i === fullText.length) {
+          title.classList.remove("is-typing");
+          title.classList.add("is-in");
+          window.setTimeout(() => btn.classList.add("is-in"), 1000);
+          return;
+        }
+        const ch = fullText[i - 1] || "";
+        const progress = fullText.length ? i / fullText.length : 0;
+        const endSlow = progress > 0.62 ? 1 + (progress - 0.62) * 4.5 : 1;
+        const base = (ch === " " ? 52 : 58) * endSlow;
+        const jitter = Math.random() * 22 * endSlow;
+        window.setTimeout(type, base + jitter);
+      }
+    };
+    type();
+  } else {
+    btn.classList.add("is-in");
+  }
+
+  const start = async () => {
+    if (state.started) return;
+    state.started = true;
+    btn.classList.add("is-loading");
+    if (state.ready) await state.ready;
+    if (!state.sphere) {
+      state.started = false;
+      btn.classList.remove("is-loading");
+      return;
+    }
+    gate.classList.add("is-gone");
+    gate.setAttribute("aria-hidden", "true");
+    document.body.classList.add("is-entered");
+    btn.classList.remove("is-loading");
+
+    await ensureHeartbeat();
+    resumeActiveVideos(state.sphere);
+    syncZoneAmbient();
+    playIntroZoom();
+  };
+
+  btn.addEventListener("click", start);
 }
 
 function setupThree(canvas) {
@@ -147,25 +212,18 @@ function setupThree(canvas) {
 
   const controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true;
-  controls.dampingFactor = 0.07;
+  controls.dampingFactor = 0.06;
   controls.enablePan = false;
-  controls.enableZoom = false;
-  controls.minPolarAngle = 0;
-  controls.maxPolarAngle = Math.PI;
+  controls.enableZoom = true;
+  controls.enableRotate = true;
+  controls.zoomSpeed = 1.1;
+  controls.rotateSpeed = 0.85;
+  controls.minPolarAngle = 0.05;
+  controls.maxPolarAngle = Math.PI - 0.05;
   controls.target.set(0, 0, 0);
-  controls.minDistance = 0.5;
+  controls.minDistance = 1.5;
   controls.maxDistance = 400;
   controls.enabled = false;
-
-  // Dentro: a riposo al centro; zoom solo verso la parete di fronte
-  const inside = createInsideControls(camera, canvas, {
-    getRadius: () => state.sphere?.radius ?? SPHERE_RADIUS,
-    centerDistance: INSIDE_CENTER_MIN,
-    wallMargin: INSIDE_WALL_MARGIN,
-    zoomSpeed: 2.8,
-    rotateSpeed: 0.0045,
-  });
-  inside.setEnabled(false);
 
   // Vista iniziale: tutta la sfera (raggio fisso) con margine
   frameWholeSphere(camera, controls, SPHERE_RADIUS);
@@ -174,7 +232,6 @@ function setupThree(canvas) {
   state.scene = scene;
   state.camera = camera;
   state.controls = controls;
-  state.inside = inside;
 
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -185,12 +242,7 @@ function setupThree(canvas) {
 
 /** Posiziona la camera fuori dalla sfera in modo da vederla intera. */
 function frameWholeSphere(camera, controls, radius, padding = 1.45) {
-  const fov = (camera.fov * Math.PI) / 180;
-  const fitHeight = radius / Math.tan(fov / 2);
-  const fitWidth = radius / (Math.tan(fov / 2) * camera.aspect);
-  const distance = Math.max(fitHeight, fitWidth) * padding;
-
-  // Leggera elevazione per leggere meglio la forma sferica
+  const distance = frameDistance(radius, camera, padding);
   const elev = distance * 0.22;
   const z = Math.sqrt(Math.max(distance * distance - elev * elev, 1));
   camera.position.set(0, elev, z);
@@ -198,22 +250,35 @@ function frameWholeSphere(camera, controls, radius, padding = 1.45) {
   controls.update();
 }
 
-/** Attiva navigazione interna: camera ferma al centro finché l’utente non zooma. */
-function lockInsideSphere() {
-  const camera = state.camera;
+/** Orbit + zoom: dentro/fuori la sfera, mentre lei continua a girare. */
+function enableOrbitNav() {
   const controls = state.controls;
-  const inside = state.inside;
-  if (!camera || !inside) return;
+  const camera = state.camera;
+  if (!controls || !camera) return;
 
-  controls.enabled = false;
-  // Resta al centro; lo sguardo punta la parete che aveva di fronte nell’intro
-  camera.position.setLength(INSIDE_CENTER_MIN);
-  inside.setEnabled(true); // syncLookFromCamera: zoom=0 al centro
-  state.insideReady = true;
+  const R = SPHERE_RADIUS;
+  const maxDist = Math.max(R * 2.9, frameDistance(R, camera, 1.45));
+
+  controls.enabled = true;
+  controls.enableZoom = true;
+  controls.enableRotate = true;
+  controls.enablePan = false;
+  controls.minDistance = 1.5;
+  controls.maxDistance = maxDist;
+  controls.target.set(0, 0, 0);
+  controls.update();
+  state.navReady = true;
+}
+
+function frameDistance(radius, camera, padding = 1.45) {
+  const fov = (camera.fov * Math.PI) / 180;
+  const fitHeight = radius / Math.tan(fov / 2);
+  const fitWidth = radius / (Math.tan(fov / 2) * Math.max(camera.aspect, 0.2));
+  return Math.max(fitHeight, fitWidth) * padding;
 }
 
 /**
- * 1s sulla sfera intera → lento zoom fino al centro → navigazione interna.
+ * 2s sulla sfera intera (che gira) → zoom al centro → OrbitControls.
  */
 function playIntroZoom() {
   const camera = state.camera;
@@ -223,28 +288,24 @@ function playIntroZoom() {
 
   if (state.introTween && typeof gsap !== "undefined") state.introTween.kill();
 
-  state.insideReady = false;
-  state.inside?.setEnabled(false);
+  state.navReady = false;
   controls.enabled = false;
-  controls.minDistance = 0.5;
-  controls.maxDistance = 400;
   frameWholeSphere(camera, controls, radius);
 
   const from = camera.position.clone();
-  const toDist = Math.max(INSIDE_CENTER_MIN + 0.15, 0.5);
-  const to = from.clone().normalize().multiplyScalar(toDist);
+  const to = from.clone().normalize().multiplyScalar(INTRO_CENTER_DIST);
   const proxy = { t: 0 };
 
-  const finishInside = () => {
+  const finishNav = () => {
     camera.position.copy(to);
-    // Solo a fine intro: navigazione con sguardo alle pareti
-    lockInsideSphere();
+    camera.lookAt(0, 0, 0);
+    enableOrbitNav();
     state.introTween = null;
   };
 
   const runZoom = () => {
     if (typeof gsap === "undefined") {
-      finishInside();
+      finishNav();
       return;
     }
 
@@ -253,15 +314,15 @@ function playIntroZoom() {
       duration: 4.2,
       ease: "power2.inOut",
       onUpdate: () => {
-        // Come prima: avvicinamento al centro guardando sempre il centro
         camera.position.lerpVectors(from, to, proxy.t);
         camera.lookAt(0, 0, 0);
       },
-      onComplete: finishInside,
+      onComplete: finishNav,
     });
   };
 
-  window.setTimeout(runZoom, 1000);
+  // Attende 2s: sfera visibile e in rotazione, poi zoom verso il centro
+  window.setTimeout(runZoom, 2000);
 }
 
 async function ensureHeartbeat() {
@@ -277,18 +338,13 @@ async function ensureHeartbeat() {
 
 /** Ambient per zona: tracce della zona in sequenza, loop, stessa altezza, crossfade. */
 function syncZoneAmbient() {
-  const root = document.getElementById("ambient-root");
   const tracks = state.data?.zones?.[state.zone]?.audio || [];
-  const hasAudio = tracks.length > 0;
-  root?.classList.toggle("is-active", hasAudio);
-
-  if (!hasAudio) {
+  if (!tracks.length) {
     state.ambient.stop();
     return;
   }
 
   const changed = state.ambient.setTracks(tracks);
-  // force solo al cambio zona/playlist; i gesti successivi non ripartono da capo
   state.ambient.start({ force: changed });
 }
 
@@ -307,118 +363,106 @@ function applyZoneInstant(zoneId) {
   state.fluid?.setPalette({ a: cfg.bgA, b: cfg.bgB, c: cfg.bgC }, { duration: 0 });
   state.fluid?.setSpeed(cfg.fluidSpeed ?? 1);
   state.audio.setBpm(state.avgBpm);
-  ensureHeartbeat();
-  resumeActiveVideos(state.sphere);
-  syncZoneAmbient();
+  if (state.started) {
+    ensureHeartbeat();
+    resumeActiveVideos(state.sphere);
+    syncZoneAmbient();
+  }
   document.documentElement.style.setProperty("--accent", cfg.accent);
-  if (state.insideReady) state.inside?.update();
+  document.documentElement.style.setProperty("--hud-accent", cfg.accent);
+  state.hud?.setZone(zoneId, { silent: true });
 }
 
-/** Transizione fluida — la camera non viene mai resettata. */
+/** Cambio zona: swap immagini + rotazione rapida (niente fade). */
 function transitionToZone(zoneId) {
   if (zoneId === state.zone) return;
 
-  const from = zoneConfig(state.zone);
   const to = zoneConfig(zoneId);
   const zone = state.data.zones[zoneId];
 
   if (state.zoneTween && typeof gsap !== "undefined") state.zoneTween.kill();
+  state.zoneTween = null;
 
   state.zone = zoneId;
   state.avgBpm = zone.avgBpm;
   state.sphere.pulseDepth = to.pulseDepth;
   state.sphere.groupPulse = to.groupPulse;
   state.audio.setBpm(state.avgBpm);
-  // Crossfade cromatico ~1s: fonde i colori, poi lascia spazio alla zona
-  state.fluid?.setPalette({ a: to.bgA, b: to.bgB, c: to.bgC }, { duration: 1.85 });
+  state.fluid?.setPalette({ a: to.bgA, b: to.bgB, c: to.bgC }, { duration: 1.35 });
   state.fluid?.setSpeed(to.fluidSpeed ?? 1);
-  syncZoneAmbient();
+  if (state.started) syncZoneAmbient();
   document.documentElement.style.setProperty("--accent", to.accent);
+  document.documentElement.style.setProperty("--hud-accent", to.accent);
+  state.hud?.setZone(zoneId, { silent: true });
+  state.mediaHover?.hide?.();
 
-  const proxy = {
-    coverage: from.coverage,
-    saturation: from.saturation,
-    contrast: from.contrast,
-    brightness: from.brightness ?? 1,
-    opacity: 1,
-  };
+  setActiveZoneMedia(state.sphere, zoneId);
+  applyDensity(state.sphere, { radius: SPHERE_RADIUS, coverage: to.coverage });
+  applyShaderGrade(state.sphere, to.saturation, to.contrast, to.brightness ?? 1);
+  applyMediaOpacity(state.sphere, 1);
+  resumeActiveVideos(state.sphere);
 
-  const applyProxy = () => {
-    // Raggio sfera sempre fisso: anima solo la dimensione delle immagini
-    applyDensity(state.sphere, { radius: SPHERE_RADIUS, coverage: proxy.coverage });
-    applyShaderGrade(state.sphere, proxy.saturation, proxy.contrast, proxy.brightness);
-    applyMediaOpacity(state.sphere, proxy.opacity);
-    if (state.insideReady) state.inside?.update();
-  };
-
-  if (typeof gsap === "undefined") {
-    setActiveZoneMedia(state.sphere, zoneId);
-    Object.assign(proxy, {
-      coverage: to.coverage,
-      saturation: to.saturation,
-      contrast: to.contrast,
-      brightness: to.brightness ?? 1,
-      opacity: 1,
-    });
-    applyProxy();
-    return;
-  }
-
-  const tl = gsap.timeline({
-    onComplete: () => {
-      state.zoneTween = null;
-    },
-  });
-  state.zoneTween = tl;
-
-  tl.to(proxy, {
-    opacity: 0,
-    duration: 0.32,
-    ease: "power1.inOut",
-    onUpdate: () => applyMediaOpacity(state.sphere, proxy.opacity),
-  });
-
-  tl.add(() => {
-    setActiveZoneMedia(state.sphere, zoneId);
-    proxy.coverage = from.coverage;
-    proxy.saturation = from.saturation;
-    proxy.contrast = from.contrast;
-    proxy.brightness = from.brightness ?? 1;
-    proxy.opacity = 0;
-    applyProxy();
-    resumeActiveVideos(state.sphere);
-  });
-
-  tl.to(proxy, {
-    coverage: to.coverage,
-    saturation: to.saturation,
-    contrast: to.contrast,
-    brightness: to.brightness ?? 1,
-    opacity: 1,
-    duration: 1.25,
-    ease: "power2.inOut",
-    onUpdate: applyProxy,
-  });
+  // Burst di rotazione: le nuove immagini “passano” con lo spin
+  boostSphereSpin(1.55, 0.85);
 }
 
-/** Rotazione continua della sfera (immagini + wireframe). */
+/** Rotazione costante della sfera — mai interrotta. */
 const SPHERE_SPIN = 0.14; // rad/s
+let sphereSpinRate = SPHERE_SPIN;
+let spinBoostTween = null;
+
+function boostSphereSpin(peakRate, duration = 0.85) {
+  if (typeof gsap === "undefined") {
+    sphereSpinRate = SPHERE_SPIN;
+    return;
+  }
+  if (spinBoostTween) spinBoostTween.kill();
+  const proxy = { rate: Math.max(sphereSpinRate, SPHERE_SPIN) };
+  spinBoostTween = gsap
+    .timeline({
+      onComplete: () => {
+        sphereSpinRate = SPHERE_SPIN;
+        spinBoostTween = null;
+      },
+    })
+    .to(proxy, {
+      rate: peakRate,
+      duration: duration * 0.22,
+      ease: "power3.out",
+      onUpdate: () => {
+        sphereSpinRate = proxy.rate;
+      },
+    })
+    .to(proxy, {
+      rate: SPHERE_SPIN,
+      duration: duration * 0.78,
+      ease: "power3.inOut",
+      onUpdate: () => {
+        sphereSpinRate = proxy.rate;
+      },
+    });
+}
 
 function animate() {
   requestAnimationFrame(animate);
   const delta = state.clock.getDelta();
   const elapsed = state.clock.elapsedTime;
   const transport = state.audio.getSyncTime(elapsed);
+
   if (state.sphere?.group) {
-    state.sphere.group.rotation.y += delta * SPHERE_SPIN;
+    state.sphere.group.rotation.y += delta * sphereSpinRate;
   }
   applyHeartbeat(state.sphere, transport, state.avgBpm);
-  keepVideosPlaying(state.sphere);
-  if (state.insideReady && state.inside?.enabled) {
-    state.inside.update();
-  } else if (!state.insideReady && state.controls && !state.introTween) {
+  if (state.started) keepVideosPlaying(state.sphere);
+
+  if (state.navReady && state.controls?.enabled) {
+    state.controls.update();
+  } else if (!state.navReady && state.controls && !state.introTween) {
     state.camera.lookAt(state.controls.target);
   }
+
+  state.mediaHover?.tick?.();
+
   state.renderer.render(state.scene, state.camera);
 }
 

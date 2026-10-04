@@ -1,9 +1,8 @@
 /**
- * Dentro la sfera:
- * - a riposo la camera resta al centro
- * - zoom in → verso la parete di fronte (si ferma poco prima)
- * - dezoom → torna al centro
- * - drag → scegli/ruota la direzione di sguardo (la parete davanti)
+ * Navigazione sfera:
+ * - drag → ruota lo sguardo
+ * - wheel → zoom out (overview) ↔ centro ↔ zoom in (parete)
+ * - lo sguardo resta sulla stessa parete (niente flip / salto foto)
  */
 
 import * as THREE from "three";
@@ -13,56 +12,108 @@ export function createInsideControls(
   domElement,
   {
     getRadius = () => 56,
-    /** Distanza dal centro a riposo (quasi 0). */
+    /** Gruppo sfera: serve ad ancorare lo sguardo alle foto mentre ruota. */
+    getSphereGroup = () => null,
     centerDistance = 0.12,
     wallMargin = 0.55,
+    outsidePadding = 1.45,
     rotateSpeed = 0.0045,
     zoomSpeed = 2.8,
+    wallLockZoom = 0.72,
   } = {}
 ) {
   let enabled = false;
-  let theta = 0;
-  let phi = Math.PI / 2;
-  /** 0 = centro; 1 = max verso la parete. */
-  let zoom = 0;
+  /**
+   * 0 = overview (lato opposto), CENTER_ZOOM = centro, 1 = parete
+   */
+  const CENTER_ZOOM = 0.45;
+  let zoom = CENTER_ZOOM;
   let dragging = false;
   let prevX = 0;
   let prevY = 0;
 
-  const _dir = new THREE.Vector3();
-  const _look = new THREE.Vector3();
-  const _fwd = new THREE.Vector3();
-  const _sph = new THREE.Spherical();
+  /** Direzione di mira in spazio locale della sfera (segue le foto). */
+  const localAim = new THREE.Vector3(0, 0, 1);
+  const _aim = new THREE.Vector3();
+  const _focus = new THREE.Vector3();
+  const _qInv = new THREE.Quaternion();
+  const _right = new THREE.Vector3();
+  const _up = new THREE.Vector3();
+  const _worldUp = new THREE.Vector3(0, 1, 0);
 
-  function maxTravel() {
-    return Math.max(0.5, getRadius() - wallMargin - centerDistance);
+  function outsideDistance() {
+    const R = getRadius();
+    const fov = (camera.fov * Math.PI) / 180;
+    const fitH = R / Math.tan(fov / 2);
+    const fitW = R / (Math.tan(fov / 2) * Math.max(camera.aspect, 0.2));
+    return Math.max(fitH, fitW) * outsidePadding;
   }
 
+  function wallDistance() {
+    return Math.max(centerDistance + 0.5, getRadius() - wallMargin);
+  }
+
+  function updateWorldAim() {
+    const g = getSphereGroup?.();
+    _aim.copy(localAim);
+    if (g) _aim.applyQuaternion(g.quaternion);
+    _aim.normalize();
+    return _aim;
+  }
+
+  function setLocalFromWorld(worldDir) {
+    const g = getSphereGroup?.();
+    localAim.copy(worldDir).normalize();
+    if (g) {
+      _qInv.copy(g.quaternion).invert();
+      localAim.applyQuaternion(_qInv).normalize();
+    }
+  }
+
+  /**
+   * Distanza lungo l’asse di mira:
+   * negativa = overview dal lato opposto, ~0 = centro, positiva = verso la parete.
+   * lookAt sempre sulla stessa parete → niente ribaltamento a 180°.
+   */
   function distanceFromZoom() {
-    return centerDistance + zoom * maxTravel();
+    if (zoom <= CENTER_ZOOM) {
+      const t = CENTER_ZOOM <= 1e-6 ? 1 : zoom / CENTER_ZOOM;
+      return THREE.MathUtils.lerp(-outsideDistance(), centerDistance, t);
+    }
+    const t = (zoom - CENTER_ZOOM) / (1 - CENTER_ZOOM);
+    return THREE.MathUtils.lerp(centerDistance, wallDistance(), t);
   }
 
   function apply() {
     zoom = Math.min(1, Math.max(0, zoom));
-    phi = Math.min(Math.PI - 0.08, Math.max(0.08, phi));
+    const aim = updateWorldAim();
+    const R = getRadius();
+    _focus.copy(aim).multiplyScalar(R);
 
-    _dir.setFromSphericalCoords(1, phi, theta);
-    const dist = distanceFromZoom();
-    camera.position.copy(_dir).multiplyScalar(dist);
+    let dist = distanceFromZoom();
+    // Evita lo zero esatto (lookAt degenerato)
+    if (Math.abs(dist) < 0.06) dist = dist < 0 ? -0.06 : 0.06;
 
-    // Parete di fronte (sempre verso fuori lungo lo sguardo)
-    _look.copy(_dir).multiplyScalar(getRadius() * 2);
-    camera.lookAt(_look);
+    camera.position.copy(aim).multiplyScalar(dist);
+    _up.copy(_worldUp);
+    if (Math.abs(aim.dot(_worldUp)) > 0.92) _up.set(0, 0, 1);
+    camera.up.copy(_up);
+    camera.lookAt(_focus);
   }
 
-  /** Allinea lo sguardo a ciò che la camera sta già guardando (parete davanti). */
+  function isZoomedIn() {
+    return zoom >= wallLockZoom;
+  }
+
   function syncLookFromCamera() {
-    camera.getWorldDirection(_fwd);
-    if (_fwd.lengthSq() < 1e-8) _fwd.set(0, 0, -1);
-    _sph.setFromVector3(_fwd);
-    theta = _sph.theta;
-    phi = _sph.phi || Math.PI / 2;
-    zoom = 0;
+    if (camera.position.lengthSq() > 1e-8) {
+      setLocalFromWorld(camera.position);
+    } else {
+      camera.getWorldDirection(_aim);
+      if (_aim.lengthSq() < 1e-8) _aim.set(0, 0, 1);
+      setLocalFromWorld(_aim);
+    }
+    zoom = CENTER_ZOOM;
     apply();
   }
 
@@ -80,9 +131,21 @@ export function createInsideControls(
     const dy = e.clientY - prevY;
     prevX = e.clientX;
     prevY = e.clientY;
-    // Ruota solo la direzione di sguardo; se zoom=0 resti al centro
-    theta -= dx * rotateSpeed;
-    phi -= dy * rotateSpeed;
+
+    // Ruota la mira in spazio mondo, poi riporta in locale sfera
+    const aim = updateWorldAim();
+    _right.crossVectors(_worldUp, aim);
+    if (_right.lengthSq() < 1e-8) _right.set(1, 0, 0);
+    _right.normalize();
+    _up.crossVectors(aim, _right).normalize();
+
+    // Fuori (dist < 0) l’orbita è invertita rispetto a dentro: correggi il segno
+    const dist = distanceFromZoom();
+    const s = dist < 0 ? -1 : 1;
+    aim.applyAxisAngle(_up, -dx * rotateSpeed * s);
+    aim.applyAxisAngle(_right, -dy * rotateSpeed * s);
+    aim.normalize();
+    setLocalFromWorld(aim);
     apply();
   }
 
@@ -99,8 +162,10 @@ export function createInsideControls(
   function onWheel(e) {
     if (!enabled) return;
     e.preventDefault();
-    // Scroll su → zoom verso la parete; scroll giù → torna al centro
-    const step = -e.deltaY * 0.0011 * zoomSpeed;
+    // Passi più piccoli vicino alla soglia centro per evitare scatti
+    const nearCenter = Math.abs(zoom - CENTER_ZOOM) < 0.08;
+    const damp = nearCenter ? 0.55 : 1;
+    const step = -e.deltaY * 0.0009 * zoomSpeed * damp;
     zoom = Math.min(1, Math.max(0, zoom + step));
     apply();
   }
@@ -117,16 +182,15 @@ export function createInsideControls(
     },
     setEnabled(v) {
       enabled = !!v;
-      if (enabled) {
-        syncLookFromCamera();
-      }
+      if (enabled) syncLookFromCamera();
     },
+    isZoomedIn,
+    /** Aggiorna la posa seguendo la rotazione sfera (stesse foto). */
     update() {
       if (enabled) apply();
     },
-    /** Forza riposo al centro, mantenendo lo sguardo attuale. */
     resetToCenter() {
-      zoom = 0;
+      zoom = CENTER_ZOOM;
       apply();
     },
     syncLookFromCamera,

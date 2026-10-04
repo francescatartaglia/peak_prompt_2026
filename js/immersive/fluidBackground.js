@@ -1,5 +1,6 @@
 /**
- * Full-viewport fluid ambient gradient (standalone WebGL canvas).
+ * Sfondo liquido dinamico — flussi, vortici e macchie che si fondono,
+ * colorati per HR zone.
  */
 
 const VERT = /* glsl */ `
@@ -17,9 +18,8 @@ const FRAG = /* glsl */ `
   uniform vec3 u_c2;
   uniform vec3 u_c3;
 
-  // Soft value noise
   float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
   }
 
   float noise(vec2 p) {
@@ -37,46 +37,103 @@ const FRAG = /* glsl */ `
     float v = 0.0;
     float a = 0.5;
     mat2 m = mat2(0.80, 0.60, -0.60, 0.80);
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 6; i++) {
       v += a * noise(p);
-      p = m * p * 2.02;
+      p = m * p * 2.05;
       a *= 0.5;
     }
     return v;
   }
 
+  // Dominio distorto: sembianza di flusso viscoso
+  vec2 flow(vec2 p, float t) {
+    vec2 q = vec2(
+      fbm(p + vec2(0.0, t * 0.35)),
+      fbm(p + vec2(5.2, -t * 0.28))
+    );
+    vec2 r = vec2(
+      fbm(p + 1.7 * q + vec2(1.7 + t * 0.22, 9.2)),
+      fbm(p + 1.7 * q + vec2(8.3, 2.8 - t * 0.31))
+    );
+    return r;
+  }
+
+  float blob(vec2 p, vec2 c, float r) {
+    float d = length(p - c);
+    return (r * r) / (d * d + 0.012);
+  }
+
   void main() {
     vec2 uv = gl_FragCoord.xy / u_res.xy;
-    vec2 p = uv * vec2(u_res.x / u_res.y, 1.0);
+    float aspect = u_res.x / max(u_res.y, 1.0);
+    vec2 p = (uv - 0.5) * vec2(aspect, 1.0);
+    float t = u_time * 0.55;
 
-    // Drift + vortici (velocità scalata da JS via u_time / fluidSpeed zona)
-    float t = u_time * 0.12;
-    vec2 q = p;
-    q += 0.18 * vec2(
-      fbm(p * 0.9 + vec2(t * 0.7, -t * 0.4)),
-      fbm(p * 0.9 + vec2(-t * 0.5, t * 0.6))
-    );
+    // Campo di flusso animato
+    vec2 f = flow(p * 1.35, t);
+    vec2 q = p + 0.55 * (f - 0.5);
 
-    float n1 = fbm(q * 0.85 + vec2(t * 1.1, -t * 0.7));
-    float n2 = fbm(q * 1.4 + vec2(-t * 0.9, t * 1.0) + n1 * 0.85);
-    float n3 = fbm(q * 0.55 + vec2(t * 0.55, -t * 0.5));
-    float swirl = fbm(q * 1.6 + vec2(n2 * 1.6, n1 * 1.2) + t * 0.55);
-    float pulse = 0.5 + 0.5 * sin(t * 1.4 + n1 * 6.2831);
+    // Seconda passata di warp (più liquido)
+    vec2 f2 = flow(q * 1.1 + vec2(t * 0.18, -t * 0.14), t * 1.15);
+    q += 0.35 * (f2 - 0.5);
 
-    float w1 = smoothstep(0.22, 0.78, n1 + swirl * 0.15);
-    float w2 = smoothstep(0.25, 0.75, n2 + pulse * 0.12);
-    float w3 = smoothstep(0.2, 0.8, n3 * 0.45 + swirl * 0.55);
+    // Metaballs che nuotano nel flusso
+    vec2 cA = vec2(sin(t * 0.41) * 0.55, cos(t * 0.33) * 0.42);
+    vec2 cB = vec2(cos(t * 0.29 + 1.9) * 0.62, sin(t * 0.47 + 0.6) * 0.5);
+    vec2 cC = vec2(sin(t * 0.37 - 1.1) * 0.48, cos(t * 0.51 + 2.4) * 0.55);
+    vec2 cD = vec2(cos(t * 0.53 + 0.4) * 0.35, sin(t * 0.27 - 1.7) * 0.38);
+    cA += 0.22 * (flow(cA + t, t) - 0.5);
+    cB += 0.22 * (flow(cB - t, t * 1.1) - 0.5);
 
-    vec3 col = mix(u_c1, u_c2, w1);
-    col = mix(col, u_c3, w2 * 0.9);
-    col = mix(col, mix(u_c2, u_c1, 0.35), w3 * 0.55);
-    // accento dinamico sulle macchie più chiare
-    col = mix(col, u_c3 * 1.08, (1.0 - w1) * w2 * 0.25);
+    float field = 0.0;
+    field += blob(q, cA, 0.38);
+    field += blob(q, cB, 0.44);
+    field += blob(q, cC, 0.36);
+    field += blob(q, cD, 0.30);
+    field += blob(q, mix(cA, cC, 0.5 + 0.5 * sin(t * 0.7)), 0.26);
+    field += 0.55 * fbm(q * 1.8 + t * 0.4);
 
-    float vig = smoothstep(1.25, 0.08, length(uv - 0.5));
-    col = mix(col * 0.72, col * 1.22, vig);
+    // Swirl cromatico dal flusso
+    float n1 = fbm(q * 0.95 + f * 1.4 + t * 0.25);
+    float n2 = fbm(q * 1.6 - f * 1.1 - t * 0.2);
+    float n3 = fbm(q * 0.55 + vec2(n1, n2) * 1.8);
 
-    gl_FragColor = vec4(col, 1.0);
+    float wA = smoothstep(0.35, 0.85, n1 + field * 0.12);
+    float wB = smoothstep(0.3, 0.9, n2 + sin(t + n3 * 6.28) * 0.08);
+    float wC = smoothstep(0.25, 0.8, field * 0.35 + n3 * 0.65);
+
+    // Base più nera + colori zona attenuati
+    vec3 deep = mix(u_c2 * 0.25, vec3(0.0), 0.7);
+    vec3 col = deep;
+    col = mix(col, u_c1 * 0.9, wA);
+    col = mix(col, u_c3 * 0.88, wB * 0.85);
+    col = mix(col, mix(u_c2, u_c1, 0.45) * 0.85, wC * 0.7);
+
+    // Highlight liquidi
+    float crest = smoothstep(1.15, 1.55, field) * (0.35 + 0.65 * n2);
+    col += u_c3 * crest * 0.28;
+    col = mix(col, u_c3 * 0.95, crest * 0.18);
+
+    // Contaminazioni di nero che attraversano il flusso
+    float ink = smoothstep(0.42, 0.72, fbm(q * 1.25 - t * 0.2 + f * 0.8));
+    float ink2 = smoothstep(0.55, 0.8, n3 + (1.0 - field * 0.2));
+    col = mix(col, vec3(0.0), ink * 0.45);
+    col = mix(col, vec3(0.0), ink2 * 0.28);
+    col *= 0.78 + 0.22 * (1.0 - ink);
+
+    // Micro-ripple tenue
+    float ripple = sin(q.x * 18.0 + t * 3.5 + n1 * 8.0) *
+                   sin(q.y * 14.0 - t * 2.8) * 0.012;
+    col += ripple;
+
+    // Grain
+    float g = hash(gl_FragCoord.xy * 0.7 + floor(t * 20.0)) * 0.03;
+    col += g - 0.02;
+
+    float vig = smoothstep(1.35, 0.08, length(uv - 0.5));
+    col *= mix(0.55, 1.0, vig);
+
+    gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
   }
 `;
 
@@ -104,6 +161,9 @@ export function createFluidBackground(canvas) {
   gl.attachShader(prog, compile(gl, gl.VERTEX_SHADER, VERT));
   gl.attachShader(prog, compile(gl, gl.FRAGMENT_SHADER, FRAG));
   gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+    console.error(gl.getProgramInfoLog(prog));
+  }
   gl.useProgram(prog);
 
   const buf = gl.createBuffer();
@@ -119,9 +179,9 @@ export function createFluidBackground(canvas) {
   const uC2 = gl.getUniformLocation(prog, "u_c2");
   const uC3 = gl.getUniformLocation(prog, "u_c3");
 
-  let c1 = [0.84, 0.91, 0.97];
-  let c2 = [0.66, 0.8, 0.94];
-  let c3 = [0.93, 0.96, 0.99];
+  let c1 = [0.55, 0.78, 0.92];
+  let c2 = [0.08, 0.18, 0.28];
+  let c3 = [0.85, 0.94, 1.0];
   let from = { c1: c1.slice(), c2: c2.slice(), c3: c3.slice() };
   let to = { c1: c1.slice(), c2: c2.slice(), c3: c3.slice() };
   let blendStart = 0;
@@ -165,15 +225,6 @@ export function createFluidBackground(canvas) {
     return x * x * x * (x * (x * 6 - 15) + 10);
   }
 
-  /** Ease molto soft: resta a lungo in fusione, poi cede al colore zona. */
-  function blendEase(u) {
-    // 0–0.62: da → mix, 0.62–1: mix → target
-    if (u <= 0.62) {
-      return 0.5 * smootherstep(u / 0.62);
-    }
-    return 0.5 + 0.5 * smootherstep((u - 0.62) / 0.38);
-  }
-
   function frame() {
     raf = requestAnimationFrame(frame);
     resize();
@@ -181,7 +232,7 @@ export function createFluidBackground(canvas) {
     const now = performance.now();
     if (blending) {
       const u = Math.min(1, (now - blendStart) / Math.max(blendDuration, 1));
-      const t = blendEase(u);
+      const t = smootherstep(u);
       copy3(mix3(from.c1, to.c1, t), c1);
       copy3(mix3(from.c2, to.c2, t), c2);
       copy3(mix3(from.c3, to.c3, t), c3);
@@ -193,7 +244,7 @@ export function createFluidBackground(canvas) {
       }
     }
 
-    speed += (targetSpeed - speed) * 0.04;
+    speed += (targetSpeed - speed) * 0.05;
     simTime += (now - lastNow) * 0.001 * speed;
     lastNow = now;
 

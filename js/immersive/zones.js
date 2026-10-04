@@ -1,9 +1,8 @@
 /**
- * Quattro zone HR — densità, grade flat→ricco, sfondi colorati dinamici.
- * Raggio sfera fisso: cambia solo la dimensione delle immagini (coverage).
+ * Quattro zone HR — palette liquid-patch + grade radiography.
+ * Raggio sfera fisso: cambia solo coverage / pulse / fluid.
  */
 
-/** Raggio costante in tutte le zone — spazio ampio centro ↔ pareti. */
 export const SPHERE_RADIUS = 56;
 
 export const ZONES = {
@@ -11,85 +10,84 @@ export const ZONES = {
     id: 1,
     label: "Zone 1",
     range: "< 136 bpm",
+    rangeLabel: "Zone 1: < 136 bpm",
     fallbackBpm: 118,
-    // Azzurro — chiaro / medio / scuro più contrastati
-    bgA: "#b8e4ff",
-    bgB: "#1e7ec4",
-    bgC: "#e8f6ff",
-    accent: "#2b8fd4",
+    // Azzurro più chiaro + nero
+    bgA: "#5a96bc",
+    bgB: "#020508",
+    bgC: "#9ecce8",
+    accent: "#5aa8d4",
     radius: SPHERE_RADIUS,
-    // Più piccole: aria tra le foto
-    coverage: 0.34,
-    saturation: 1,
-    contrast: 1,
-    brightness: 1.28,
-    pulseDepth: 0.06,
-    groupPulse: 0.03,
-    // Dinamismo sfondo: calmo in zona 1, accelera fino alla 4
-    fluidSpeed: 0.42,
+    coverage: 0.42,
+    saturation: 0.38,
+    contrast: 1.12,
+    brightness: 1.42,
+    pulseDepth: 0.12,
+    groupPulse: 0.045,
+    fluidSpeed: 0.85,
     audio: { gain: 0.22, bass: 0.32, drive: 0.05 },
   },
   2: {
     id: 2,
     label: "Zone 2",
-    range: "137–150 bpm",
+    range: "137 - 150 bpm",
+    rangeLabel: "Zone 2: 137 - 150 bpm",
     fallbackBpm: 143,
-    // Verde bosco — ancora un filo più chiaro
-    bgA: "#6fa856",
-    bgB: "#245428",
-    bgC: "#a4c96e",
-    accent: "#4a8f3c",
+    // Verde più chiaro + nero
+    bgA: "#5a8a40",
+    bgB: "#020604",
+    bgC: "#a0c878",
+    accent: "#6a9a48",
     radius: SPHERE_RADIUS,
-    // Un gradino sopra la zona 1
-    coverage: 0.48,
-    saturation: 1,
-    contrast: 1,
-    brightness: 1.28,
-    pulseDepth: 0.1,
-    groupPulse: 0.055,
-    fluidSpeed: 0.75,
+    coverage: 0.56,
+    saturation: 0.42,
+    contrast: 1.38,
+    brightness: 1.22,
+    pulseDepth: 0.16,
+    groupPulse: 0.07,
+    fluidSpeed: 1.25,
     audio: { gain: 0.4, bass: 0.55, drive: 0.16 },
   },
   3: {
     id: 3,
     label: "Zone 3",
-    range: "151–164 bpm",
+    range: "151 - 164 bpm",
+    rangeLabel: "Zone 3: 151 - 164 bpm",
     fallbackBpm: 158,
-    // Arancio → rosso (mix caldo)
-    bgA: "#ffb04a",
-    bgB: "#e04828",
-    bgC: "#ffd078",
-    accent: "#e85a22",
+    // Arancio più chiaro + nero
+    bgA: "#d07030",
+    bgB: "#060201",
+    bgC: "#f0b070",
+    accent: "#e87830",
     radius: SPHERE_RADIUS,
-    // Ancora più grandi, senza riempire tutto
-    coverage: 0.62,
-    saturation: 1,
-    contrast: 1,
-    brightness: 1.28,
-    pulseDepth: 0.15,
+    coverage: 0.7,
+    saturation: 0.46,
+    contrast: 1.68,
+    brightness: 1.0,
+    pulseDepth: 0.2,
     groupPulse: 0.1,
-    fluidSpeed: 1.25,
+    fluidSpeed: 1.7,
     audio: { gain: 0.62, bass: 0.75, drive: 0.38 },
   },
   4: {
     id: 4,
     label: "Zone 4",
     range: "165+ bpm",
+    rangeLabel: "Zone 4: 165+ bpm",
     fallbackBpm: 172,
-    // Rosso — contrasto alto tra chiaro / nero / saturo
-    bgA: "#ff5c4a",
-    bgB: "#0a0002",
-    bgC: "#c00818",
-    accent: "#e01228",
+    // Rosso più chiaro + nero
+    bgA: "#c02838",
+    bgB: "#020001",
+    bgC: "#e86870",
+    accent: "#e01830",
     radius: SPHERE_RADIUS,
-    // Le più grandi: un filo sopra la vecchia zona 2 (~0.68)
-    coverage: 0.78,
-    saturation: 1,
-    contrast: 1,
-    brightness: 1.28,
-    pulseDepth: 0.2,
+    coverage: 0.86,
+    saturation: 0.5,
+    contrast: 2.05,
+    brightness: 0.82,
+    pulseDepth: 0.26,
     groupPulse: 0.14,
-    fluidSpeed: 1.9,
+    fluidSpeed: 2.4,
     audio: { gain: 0.92, bass: 0.95, drive: 0.8 },
   },
 };
@@ -98,4 +96,14 @@ export const ZONE_ORDER = [1, 2, 3, 4];
 
 export function zoneConfig(id) {
   return ZONES[id] || ZONES[1];
+}
+
+/** Continui intervalli BPM (nessun buco a 136). */
+export function zoneFromBpm(bpm) {
+  const v = Number(bpm);
+  if (!Number.isFinite(v)) return 1;
+  if (v < 137) return 1; // Zone 1: < 136 (+ 136 di bordo)
+  if (v <= 150) return 2; // Zone 2: 137 - 150
+  if (v <= 164) return 3; // Zone 3: 151 - 164
+  return 4; // Zone 4: 165+
 }

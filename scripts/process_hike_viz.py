@@ -245,6 +245,8 @@ def load_media(path: Path, track: List[dict]) -> List[dict]:
         best_i = min(candidates, key=lambda idx: abs((track_times[idx] - t).total_seconds()))
         pt = track[best_i]
         delta = abs((track_times[best_i] - t).total_seconds())
+        file_path = ROOT / asset["path"]
+        file_bytes = file_path.stat().st_size if file_path.is_file() else None
         out.append(
             {
                 "id": asset["id"],
@@ -253,6 +255,7 @@ def load_media(path: Path, track: List[dict]) -> List[dict]:
                 "source": asset.get("source"),
                 "time": asset["time"] if asset["time"].endswith("Z") or "+" in asset["time"] else parse_iso(asset["time"]).isoformat().replace("+00:00", "Z"),
                 "duration": asset.get("duration"),
+                "bytes": file_bytes,
                 "onTrack": bool(asset.get("onTrack")),
                 "trackIndex": best_i,
                 "lat": pt["lat"],

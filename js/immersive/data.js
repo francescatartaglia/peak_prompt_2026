@@ -57,6 +57,9 @@ export async function loadHikeData(url = "data/hike_viz.json") {
 
   return {
     title: raw.title || "Rifugio Lagazuoi",
+    gpx: raw.gpx || "assets/peak_prompt.gpx",
+    track: Array.isArray(raw.track) ? raw.track : [],
+    stats: raw.stats || null,
     zones,
   };
 }

@@ -3,7 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Lagazuoi</title>
+    <title>PEAK PROMPT · TAC</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=VT323&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="style.css" />
     <script type="importmap">
       {
@@ -18,11 +24,18 @@
     <canvas id="bg" aria-hidden="true"></canvas>
     <canvas id="c"></canvas>
 
-    <div id="slider-root" class="slider-root"></div>
-    <div id="ambient-root" class="ambient-root"></div>
-    <div id="volume-root" class="volume-root"></div>
+    <div id="hud-root" class="hud-root"></div>
+    <div id="media-hover-root" class="media-hover-root" aria-hidden="true"></div>
 
     <div id="boot" class="boot" aria-hidden="true"></div>
+
+    <div id="gate" class="gate" aria-hidden="false">
+      <div class="gate-grain" aria-hidden="true"></div>
+      <div class="gate-panel">
+        <h1 class="gate-title" id="gate-title" aria-label="EVERY PEAK HAS ITS OWN BEAT"></h1>
+        <button type="button" id="gate-start" class="gate-start">[ACCESS CARDIAC REPORT]</button>
+      </div>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
     <script type="module" src="js/immersive/main.js"></script>
