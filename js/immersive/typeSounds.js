@@ -1,5 +1,5 @@
 /**
- * Click meccanici da tastiera (sintetizzati) — a tempo con la digitazione.
+ * Click meccanici / elettronici (sintetizzati) — a tempo con la formazione testo.
  */
 
 let ctx = null;
@@ -16,13 +16,13 @@ function ensureCtx() {
 
 function buildNoise(ac) {
   if (noiseBuf) return noiseBuf;
-  const len = Math.floor(ac.sampleRate * 0.04);
+  const len = Math.floor(ac.sampleRate * 0.03);
   const buf = ac.createBuffer(1, len, ac.sampleRate);
   const data = buf.getChannelData(0);
   for (let i = 0; i < len; i += 1) {
-    // Burst breve con decadimento naturale
     const t = i / len;
-    data[i] = (Math.random() * 2 - 1) * (1 - t) ** 1.6;
+    // Rumore digitale più “secco”
+    data[i] = (Math.random() * 2 - 1) * (1 - t) ** 2.2;
   }
   noiseBuf = buf;
   return buf;
@@ -52,58 +52,88 @@ export function armTypeSounds() {
   };
   window.addEventListener("pointerdown", unlock, { passive: true });
   window.addEventListener("keydown", unlock);
-  // Tentativo immediato (funziona se il contesto è già sbloccato)
   resume();
 }
 
-function fireClick(ac, { space = false, gain = 0.22 } = {}) {
+/**
+ * Tick elettronico/meccanico (relay + blip digitale).
+ * @param {AudioContext} ac
+ * @param {{ space?: boolean, gain?: number, uniform?: boolean, fluid?: boolean }} opts
+ */
+function fireClick(ac, { space = false, gain = 0.22, uniform = false, fluid = false } = {}) {
   const t0 = ac.currentTime;
+  const peak = Math.min(0.85, Math.max(0.06, gain)) * (space && !uniform ? 0.55 : 1);
+  const dur = fluid ? 0.038 : space && !uniform ? 0.05 : 0.032;
+
+  // Burst noise filtrato (meccanico / relay)
   const buf = buildNoise(ac);
   const src = ac.createBufferSource();
   src.buffer = buf;
-  src.playbackRate.value = space ? 0.72 + Math.random() * 0.08 : 0.95 + Math.random() * 0.22;
+  src.playbackRate.value = uniform || fluid ? (fluid ? 1.15 : 1.05) : space ? 0.75 : 1.05 + Math.random() * 0.15;
 
   const bp = ac.createBiquadFilter();
   bp.type = "bandpass";
-  bp.frequency.value = space ? 420 + Math.random() * 80 : 1800 + Math.random() * 900;
-  bp.Q.value = space ? 0.7 : 1.1;
+  bp.frequency.value = uniform || fluid ? (fluid ? 2100 : 1850) : space ? 480 : 2000;
+  bp.Q.value = fluid ? 1.6 : 2.2;
 
   const hp = ac.createBiquadFilter();
   hp.type = "highpass";
-  hp.frequency.value = space ? 180 : 600;
+  hp.frequency.value = fluid ? 900 : 700;
 
-  const g = ac.createGain();
-  const peak = Math.min(0.85, Math.max(0.08, gain)) * (space ? 0.62 : 1);
-  g.gain.setValueAtTime(0.0001, t0);
-  g.gain.exponentialRampToValueAtTime(peak, t0 + 0.004);
-  g.gain.exponentialRampToValueAtTime(0.0001, t0 + (space ? 0.045 : 0.028));
-
-  // Corpo “plastica” leggero
-  const osc = ac.createOscillator();
-  osc.type = "triangle";
-  osc.frequency.value = space ? 110 + Math.random() * 30 : 240 + Math.random() * 120;
-  const og = ac.createGain();
-  og.gain.setValueAtTime(0.0001, t0);
-  og.gain.exponentialRampToValueAtTime(peak * 0.28, t0 + 0.003);
-  og.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.018);
+  const ng = ac.createGain();
+  ng.gain.setValueAtTime(0.0001, t0);
+  ng.gain.exponentialRampToValueAtTime(peak * (fluid ? 0.55 : 0.7), t0 + 0.002);
+  ng.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
 
   src.connect(bp);
   bp.connect(hp);
-  hp.connect(g);
-  g.connect(ac.destination);
+  hp.connect(ng);
+  ng.connect(ac.destination);
 
-  osc.connect(og);
+  // Blip square elettronico
+  const osc = ac.createOscillator();
+  osc.type = "square";
+  const baseHz = uniform || fluid ? (fluid ? 980 : 880) : space ? 160 : 720 + Math.random() * 200;
+  osc.frequency.setValueAtTime(baseHz, t0);
+  // Micro chirp verso il basso → feeling servo/relay
+  osc.frequency.exponentialRampToValueAtTime(baseHz * 0.72, t0 + (fluid ? 0.022 : 0.016));
+
+  const lp = ac.createBiquadFilter();
+  lp.type = "lowpass";
+  lp.frequency.value = fluid ? 2400 : 3200;
+  lp.Q.value = 0.7;
+
+  const og = ac.createGain();
+  og.gain.setValueAtTime(0.0001, t0);
+  og.gain.exponentialRampToValueAtTime(peak * (fluid ? 0.22 : 0.32), t0 + 0.0015);
+  og.gain.exponentialRampToValueAtTime(0.0001, t0 + (fluid ? 0.028 : 0.02));
+
+  osc.connect(lp);
+  lp.connect(og);
   og.connect(ac.destination);
 
+  // Armonica alta sottile (digitale)
+  const hi = ac.createOscillator();
+  hi.type = "square";
+  hi.frequency.value = baseHz * 2.5;
+  const hg = ac.createGain();
+  hg.gain.setValueAtTime(0.0001, t0);
+  hg.gain.exponentialRampToValueAtTime(peak * (fluid ? 0.06 : 0.1), t0 + 0.001);
+  hg.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.012);
+  hi.connect(hg);
+  hg.connect(ac.destination);
+
   src.start(t0);
-  src.stop(t0 + 0.05);
+  src.stop(t0 + 0.045);
   osc.start(t0);
-  osc.stop(t0 + 0.022);
+  osc.stop(t0 + 0.03);
+  hi.start(t0);
+  hi.stop(t0 + 0.015);
 }
 
 /**
- * Un colpo tasto. `space` = thud più cupo; altrimenti click più acuto.
- * @param {{ space?: boolean, gain?: number }} [opts]
+ * Un colpo tasto elettronico.
+ * @param {{ space?: boolean, gain?: number, uniform?: boolean, fluid?: boolean }} [opts]
  */
 export function playTypeClick(opts = {}) {
   const ac = ensureCtx();
@@ -112,7 +142,6 @@ export function playTypeClick(opts = {}) {
     fireClick(ac, opts);
     return;
   }
-  // Autoplay: sblocca e riprova (al primo gesto i click restanti partono)
   resume().then((ok) => {
     if (ok) fireClick(ac, opts);
   });

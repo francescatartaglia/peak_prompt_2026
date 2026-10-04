@@ -3,6 +3,7 @@
  */
 
 import * as THREE from "three";
+import { morphTextInPlace } from "./textMorph.js";
 
 function basename(path) {
   const s = String(path || "");
@@ -78,20 +79,15 @@ export function createMediaHover(root, { camera, domElement, getMeshes, isEnable
   let lastX = 0;
   let lastY = 0;
   let hasPointer = false;
+  let lastAssetKey = "";
 
   function hide() {
     hovering = null;
+    lastAssetKey = "";
     el.classList.remove("is-on");
   }
 
-  function show(asset, x, y) {
-    const [name, format, size, time] = mediaHoverLines(asset);
-    lines.name.textContent = name;
-    lines.format.textContent = format;
-    lines.size.textContent = size;
-    lines.time.textContent = time;
-    el.classList.add("is-on");
-
+  function place(x, y) {
     const pad = 16;
     const w = el.offsetWidth || 180;
     const h = el.offsetHeight || 90;
@@ -102,6 +98,32 @@ export function createMediaHover(root, { camera, domElement, getMeshes, isEnable
     left = Math.max(pad, left);
     top = Math.max(pad, top);
     el.style.transform = `translate(${left}px, ${top}px)`;
+  }
+
+  function show(asset, x, y) {
+    const key = asset?.id || asset?.path || "";
+    const vals = mediaHoverLines(asset);
+    const nodes = [lines.name, lines.format, lines.size, lines.time];
+
+    if (key !== lastAssetKey) {
+      lastAssetKey = key;
+      nodes.forEach((node, i) => {
+        const text = vals[i] ?? "";
+        node.textContent = "";
+        node.style.minWidth = `${Math.max(text.length, 1)}ch`;
+        // Stesso morph leggero del gate, senza audio
+        morphTextInPlace(node, text, {
+          click: false,
+          slowLock: 42,
+          fastLock: 30,
+          scrambleMs: 18,
+          startDelay: 36 + i * 48,
+        });
+      });
+    }
+
+    el.classList.add("is-on");
+    place(x, y);
   }
 
   function pick(clientX, clientY) {

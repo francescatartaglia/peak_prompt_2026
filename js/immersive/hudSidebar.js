@@ -111,7 +111,15 @@ export function createHudSidebar(
   const pts = projectTrack(track);
   let zone = startZone;
   let autoplay = false;
-  let progressIndex = -1;
+  /** Posizione continua lungo il GPX (float indice); -1 = nascosto */
+  let progressPos = -1;
+  let progressTarget = -1;
+  /** idle | hold | seek | scrub */
+  let progressMode = "idle";
+  let scrubTarget = 0;
+  let progressRaf = 0;
+  let lastProgressTs = 0;
+  const SEEK_PER_SEC = 42;
 
   root.innerHTML = `
     <aside class="hud" aria-label="Cardiac CT diagnostics">
@@ -219,7 +227,7 @@ export function createHudSidebar(
 
     if (pts.length < 2) {
       ctx.fillStyle = "rgba(200,210,220,0.25)";
-      ctx.font = "14px VT323, monospace";
+      ctx.font = "16px VT323, monospace";
       ctx.fillText("NO TRACK", 12, 24);
       return;
     }
@@ -293,23 +301,91 @@ export function createHudSidebar(
     ctx.arc(b.x * cssW, b.y * cssH, 3.5, 0, Math.PI * 2);
     ctx.fill();
 
-    // Pallino progresso (autoplay / posizione sul percorso)
-    if (progressIndex >= 0 && progressIndex < pts.length) {
-      const p = pts[progressIndex];
-      const dotAccent = zoneConfig(p.zone || zone).accent;
-      ctx.fillStyle = "#ffffff";
-      ctx.shadowColor = dotAccent;
-      ctx.shadowBlur = 10;
-      ctx.beginPath();
-      ctx.arc(p.x * cssW, p.y * cssH, 4.2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.shadowBlur = 0;
-      ctx.strokeStyle = dotAccent;
-      ctx.lineWidth = 1.4;
-      ctx.beginPath();
-      ctx.arc(p.x * cssW, p.y * cssH, 5.5, 0, Math.PI * 2);
-      ctx.stroke();
+    // Pallino progresso continuo (autoplay / scrub)
+    if (progressPos >= 0 && pts.length) {
+      const p = samplePath(progressPos);
+      if (p) {
+        const dotAccent = zoneConfig(p.zone || zone).accent;
+        ctx.fillStyle = "#ffffff";
+        ctx.shadowColor = dotAccent;
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.arc(p.x * cssW, p.y * cssH, 4.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = dotAccent;
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.arc(p.x * cssW, p.y * cssH, 5.5, 0, Math.PI * 2);
+        ctx.stroke();
+      }
     }
+  }
+
+  function samplePath(t) {
+    const n = pts.length;
+    if (!n) return null;
+    if (t <= 0) return pts[0];
+    if (t >= n - 1) return pts[n - 1];
+    const i = Math.floor(t);
+    const f = t - i;
+    const a = pts[i];
+    const b = pts[Math.min(n - 1, i + 1)];
+    return {
+      x: a.x + (b.x - a.x) * f,
+      y: a.y + (b.y - a.y) * f,
+      zone: f < 0.5 ? a.zone : b.zone,
+    };
+  }
+
+  function stopProgressLoop() {
+    if (progressRaf) {
+      cancelAnimationFrame(progressRaf);
+      progressRaf = 0;
+    }
+  }
+
+  function ensureProgressLoop() {
+    if (progressRaf || !autoplay) return;
+    if (progressPos < 0 && progressMode !== "scrub") return;
+    lastProgressTs = performance.now();
+    const tick = (now) => {
+      progressRaf = 0;
+      if (!autoplay) return;
+      if (progressPos < 0 && progressMode !== "scrub") return;
+      const dt = Math.min(0.05, (now - lastProgressTs) / 1000);
+      lastProgressTs = now;
+      const n = pts.length;
+      if (!n) return;
+
+      let dirty = false;
+      if (progressMode === "scrub") {
+        const k = Math.min(1, dt * 16);
+        const next = progressPos + (scrubTarget - progressPos) * k;
+        if (Math.abs(next - progressPos) > 0.0008) {
+          progressPos = next;
+          dirty = true;
+        }
+      } else if (progressMode === "seek") {
+        // Solo riallineamento al nuovo contenuto / fine scrub — non “corre” da solo
+        const delta = progressTarget - progressPos;
+        const step = SEEK_PER_SEC * dt;
+        if (Math.abs(delta) <= step) {
+          progressPos = progressTarget;
+          progressMode = "hold";
+        } else {
+          progressPos += Math.sign(delta) * step;
+        }
+        dirty = true;
+      }
+      // hold: fermo sul punto del media corrente
+
+      if (dirty) drawTrack();
+      if (autoplay && (progressPos >= 0 || progressMode === "scrub")) {
+        progressRaf = requestAnimationFrame(tick);
+      }
+    };
+    progressRaf = requestAnimationFrame(tick);
   }
 
   function paintAutoplay() {
@@ -332,7 +408,9 @@ export function createHudSidebar(
   function nearestTrackIndex(clientX, clientY) {
     if (!canvas || pts.length < 1) return 0;
     const rect = canvas.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return progressIndex >= 0 ? progressIndex : 0;
+    if (rect.width <= 0 || rect.height <= 0) {
+      return progressPos >= 0 ? Math.round(progressPos) : 0;
+    }
     const nx = (clientX - rect.left) / rect.width;
     const ny = (clientY - rect.top) / rect.height;
     let best = 0;
@@ -373,23 +451,60 @@ export function createHudSidebar(
     autoplay = !!next;
     paintAutoplay();
     if (!autoplay) {
-      progressIndex = -1;
+      progressPos = -1;
+      progressTarget = -1;
+      progressMode = "idle";
+      stopProgressLoop();
       drawTrack();
     }
     if (!silent) onAutoplayChange?.(autoplay);
   }
 
-  /** Indice punto GPX (0…n-1) per il pallino sul percorso. */
-  function setTrackProgress(index) {
+  /**
+   * Pallino sync al media: -1 = nascosto (restart), altrimenti punto GPX del contenuto.
+   * @param {number} index
+   * @param {{ immediate?: boolean, seek?: boolean }} [opts]
+   */
+  function setTrackProgress(index, opts = {}) {
     const n = pts.length;
-    if (!n) {
-      progressIndex = -1;
-    } else if (index == null || index < 0) {
-      progressIndex = -1;
-    } else {
-      progressIndex = Math.min(n - 1, Math.max(0, Math.round(index)));
+    if (!n || index == null || index < 0) {
+      // Scomparsa (fine giro) — niente ritorno indietro sul path
+      progressPos = -1;
+      progressTarget = -1;
+      progressMode = "idle";
+      stopProgressLoop();
+      drawTrack();
+      return;
     }
-    drawTrack();
+    const idx = Math.min(n - 1, Math.max(0, Number(index)));
+    progressTarget = idx;
+
+    // Ricomparsa all’inizio / primo fix: snap, nessuna corsa
+    if (progressPos < 0 || opts.immediate) {
+      progressPos = idx;
+      progressMode = autoplay ? "hold" : "idle";
+      drawTrack();
+      ensureProgressLoop();
+      return;
+    }
+
+    if (opts.seek || progressMode === "scrub") {
+      progressMode = "seek";
+    } else if (autoplay) {
+      if (idx + 0.05 < progressPos) {
+        // Indietro non animato (restart usa hide); snap al contenuto
+        progressPos = idx;
+        progressMode = "hold";
+        drawTrack();
+      } else if (Math.abs(idx - progressPos) > 0.03) {
+        // Nuovo media più avanti: breve riallineamento al suo punto GPX
+        progressMode = "seek";
+      } else {
+        progressMode = "hold";
+      }
+    }
+
+    ensureProgressLoop();
   }
 
   zoneRange?.addEventListener("input", () => {
@@ -404,12 +519,16 @@ export function createHudSidebar(
   });
   autoplayBtn?.addEventListener("click", () => setAutoplay(!autoplay));
 
-  // Scrubbing pallino sul percorso (solo in autoplay)
+  // Scrubbing pallino sul percorso (solo in autoplay) — movimento fluido
   let scrubbing = false;
   function scrubTo(clientX, clientY, { commit = false } = {}) {
     if (!autoplay || !pts.length) return;
     const idx = nearestTrackIndex(clientX, clientY);
-    setTrackProgress(idx);
+    scrubTarget = idx;
+    progressTarget = idx;
+    if (progressPos < 0) progressPos = idx;
+    progressMode = commit ? "seek" : "scrub";
+    ensureProgressLoop();
     if (commit) onTrackSeek?.(idx);
   }
   canvas?.addEventListener("pointerdown", (e) => {
@@ -456,6 +575,7 @@ export function createHudSidebar(
     setHeartVolume: (v) => heartSlider.set(v, { silent: true }),
     redrawTrack: drawTrack,
     dispose() {
+      stopProgressLoop();
       window.removeEventListener("resize", drawTrack);
     },
   };

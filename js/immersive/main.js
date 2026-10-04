@@ -18,6 +18,7 @@ import { createZoneAmbient } from "./zoneAmbient.js";
 import { createHudSidebar } from "./hudSidebar.js";
 import { createMediaHover } from "./mediaHover.js";
 import { armTypeSounds, playTypeClick } from "./typeSounds.js";
+import { morphTextInPlace } from "./textMorph.js";
 import { createAutoplayController, buildChronoPlaylist } from "./autoplay.js";
 
 const state = {
@@ -160,9 +161,20 @@ async function boot() {
           captionEl.setAttribute("aria-hidden", "true");
           return;
         }
-        captionEl.innerHTML = lines.map((l) => `<div>${l}</div>`).join("");
+        captionEl.innerHTML = lines
+          .map(() => `<div class="text-morph"></div>`)
+          .join("");
         captionEl.classList.add("is-on");
         captionEl.setAttribute("aria-hidden", "false");
+        [...captionEl.children].forEach((node, i) => {
+          morphTextInPlace(node, lines[i] ?? "", {
+            click: false,
+            slowLock: 42,
+            fastLock: 30,
+            scrambleMs: 18,
+            startDelay: 36 + i * 48,
+          });
+        });
         placeCaption();
       },
       getSoundVolume: () => state.ambient.getVolume(),
@@ -171,7 +183,24 @@ async function boot() {
           spinBoostTween.kill();
           spinBoostTween = null;
         }
-        sphereSpinRate = on ? SPHERE_SPIN : 0;
+        const target = on ? SPHERE_SPIN : 0;
+        if (typeof gsap === "undefined") {
+          sphereSpinRate = target;
+          return;
+        }
+        const proxy = { r: sphereSpinRate };
+        spinBoostTween = gsap.to(proxy, {
+          r: target,
+          duration: on ? 0.75 : 1.2,
+          ease: "power2.inOut",
+          onUpdate: () => {
+            sphereSpinRate = proxy.r;
+          },
+          onComplete: () => {
+            sphereSpinRate = target;
+            spinBoostTween = null;
+          },
+        });
       },
     });
     state.placeCaption = placeCaption;
@@ -197,11 +226,52 @@ async function boot() {
   animate();
 }
 
-/** Splash: titolo digitato al load, subito dopo CTA → audio + zoom. */
+function gateMorph(el, text, opts = {}) {
+  return morphTextInPlace(el, text, {
+    click: true,
+    clickSound: playTypeClick,
+    clickUniform: true,
+    ...opts,
+  });
+}
+
+function formatGateDuration(sec) {
+  const s = Math.max(0, Math.round(Number(sec) || 0));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const r = s % 60;
+  return `${h}:${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
+}
+
+function formatGateDistance(km) {
+  const n = Number(km);
+  if (!Number.isFinite(n)) return "3,31 KM";
+  return `${n.toFixed(2).replace(".", ",")} KM`;
+}
+
+function gateReportLines() {
+  const stats = state.data?.stats || {};
+  const duration = Number.isFinite(Number(stats.duration_seconds))
+    ? formatGateDuration(stats.duration_seconds)
+    : "2:32:59";
+  const distance = Number.isFinite(Number(stats.distance_km))
+    ? formatGateDistance(stats.distance_km)
+    : "3,31 KM";
+  return [
+    "NAME: PEAK PROMPT",
+    "REPORT NUMBER: 01",
+    "TYPE: TREKKING",
+    `DURATION: ${duration}`,
+    `DISTANCE: ${distance}`,
+  ];
+}
+
+/** Splash: titolo → ACCESS → meta destra (morph in sequenza). */
 function bindStartGate() {
   const gate = document.getElementById("gate");
   const btn = document.getElementById("gate-start");
   const title = document.getElementById("gate-title");
+  const meta = document.getElementById("gate-meta");
   if (!btn || !gate || gate.dataset.bound === "1") return;
   gate.dataset.bound = "1";
 
@@ -209,37 +279,83 @@ function bindStartGate() {
     title?.getAttribute("aria-label") ||
     title?.textContent?.trim() ||
     "EVERY PEAK HAS ITS OWN BEAT";
+  const ctaText =
+    (btn.getAttribute("aria-label") || btn.textContent || "").trim() ||
+    "[ACCESS CARDIAC REPORT]";
 
-  if (title) {
-    title.textContent = "";
-    title.classList.add("is-typing");
+  // Riserva layout sottotitoli vuoti finché non tocca a loro
+  btn.textContent = "";
+  btn.style.minWidth = `${ctaText.length}ch`;
+  const metaLines = meta ? [...meta.querySelectorAll("[data-gate-line]")] : [];
+  metaLines.forEach((line) => {
+    line.dataset.final = (line.textContent || "").trim();
+    line.textContent = "";
+  });
+
+  const runSequence = async () => {
     armTypeSounds();
-    let i = 0;
-    const type = () => {
-      if (i < fullText.length) {
-        i += 1;
-        const ch = fullText[i - 1] || "";
-        title.textContent = fullText.slice(0, i);
-        // Click tasto in sync con ogni carattere (spazio = thud più cupo)
-        playTypeClick({ space: ch === " ", gain: ch === " " ? 0.38 : 0.62 });
-        // Ultima lettera: cursore via nello stesso frame
-        if (i === fullText.length) {
-          title.classList.remove("is-typing");
-          title.classList.add("is-in");
-          window.setTimeout(() => btn.classList.add("is-in"), 1000);
-          return;
-        }
-        const progress = fullText.length ? i / fullText.length : 0;
-        const endSlow = progress > 0.62 ? 1 + (progress - 0.62) * 4.5 : 1;
-        const base = (ch === " " ? 52 : 58) * endSlow;
-        const jitter = Math.random() * 22 * endSlow;
-        window.setTimeout(type, base + jitter);
-      }
-    };
-    type();
-  } else {
+
+    // Stessa altezza/volume; ritmi leggermente diversi per blocco
+    const gateTone = { clickGain: 0.34, clickUniform: true };
+
+    if (title) {
+      await gateMorph(title, fullText, {
+        ...gateTone,
+        clickEvery: 1,
+        clickJitter: 0.22,
+        clickSkip: 0.06,
+        slowLock: 94,
+        fastLock: 60,
+        scrambleMs: 20,
+        fastFrom: fullText.indexOf("ITS OWN"),
+      });
+    }
+
+    await new Promise((r) => setTimeout(r, 272));
     btn.classList.add("is-in");
-  }
+    await gateMorph(btn, ctaText, {
+      ...gateTone,
+      clickEvery: 1,
+      clickJitter: 0.4,
+      clickSkip: 0.1,
+      slowLock: 95,
+      fastLock: 68,
+      scrambleMs: 24,
+      startDelay: 90,
+    });
+
+    await new Promise((r) => setTimeout(r, 280));
+    const lines = gateReportLines();
+    // Allinea nodi DOM alle righe (incluso NAME PEAK PROMPT)
+    if (meta && metaLines.length !== lines.length) {
+      meta.innerHTML = lines.map(() => `<div data-gate-line></div>`).join("");
+      metaLines.length = 0;
+      metaLines.push(...meta.querySelectorAll("[data-gate-line]"));
+    }
+    metaLines.forEach((line, i) => {
+      line.dataset.final = lines[i] || "";
+      line.textContent = "";
+      line.style.minWidth = `${(lines[i] || "").length}ch`;
+    });
+    meta?.classList.add("is-in");
+    // Info: stesso timbro; ritmo audio molto più lento (click radi, morph invariato)
+    await Promise.all(
+      metaLines.map((line, i) =>
+        gateMorph(line, line.dataset.final || lines[i] || "", {
+          ...gateTone,
+          clickEvery: 8,
+          clickJitter: 0.35,
+          clickSkip: 0.05,
+          slowLock: 95,
+          fastLock: 68,
+          scrambleMs: 24,
+          startDelay: 90 + i * 110,
+        })
+      )
+    );
+  };
+
+  runSequence();
 
   const start = async () => {
     if (state.started) return;
@@ -538,7 +654,8 @@ async function setAutoplay(on) {
 
   if (on) {
     state.controls.enabled = false;
-    state.ambient.stop();
+    // Fade ambient in parallelo all’ingresso slideshow
+    void state.ambient.stop();
     // Non await: altrimenti non si può spegnere il toggle durante lo slideshow
     void state.autoplay?.start();
   } else {

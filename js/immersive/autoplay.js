@@ -4,8 +4,7 @@
  */
 
 import * as THREE from "three";
-import { createMediaMaterial } from "./mediaShader.js";
-import { mediaHoverLines, displayMediaName } from "./mediaHover.js";
+import { mediaHoverLines } from "./mediaHover.js";
 import { ZONE_ORDER, SPHERE_RADIUS } from "./zones.js";
 import { bendGeometry, flattenGeometry } from "./sphere.js";
 
@@ -37,11 +36,72 @@ function sleep(ms, shouldAbort) {
 
 function setOpacity(mesh, opacity) {
   const mat = mesh?.material;
-  if (!mat?.uniforms?.uOpacity) return;
-  mat.uniforms.uOpacity.value = Math.min(1, Math.max(0, opacity));
-  const fade = opacity < 0.999;
-  mat.transparent = fade;
-  mat.depthWrite = !fade || opacity > 0.85;
+  if (!mat) return;
+  const o = Math.min(1, Math.max(0, opacity));
+  if (mat.uniforms?.uOpacity) {
+    mat.uniforms.uOpacity.value = o;
+    const fade = o < 0.999;
+    mat.transparent = fade;
+    mat.depthWrite = !fade || o > 0.85;
+    return;
+  }
+  mat.transparent = o < 0.999;
+  mat.opacity = o;
+  mat.depthWrite = o > 0.85;
+}
+
+function encodeMediaPath(path) {
+  return String(path || "")
+    .split("/")
+    .map((seg) => encodeURIComponent(seg))
+    .join("/");
+}
+
+const LIVE_BARS = 96;
+
+/**
+ * Waveform live tipo memo vocale, centrata nello stesso riquadro
+ * di una foto/video orizzontale (padding interno, sfondo trasparente).
+ */
+function drawLiveWaveform(canvas, history) {
+  if (!canvas || !history?.length) return;
+  const w = canvas.width;
+  const h = canvas.height;
+  const ctx = canvas.getContext("2d", { alpha: true });
+  ctx.clearRect(0, 0, w, h);
+
+  // Area utile centrata nel frame foto (margini laterali/verticali)
+  const padX = w * 0.08;
+  const padY = h * 0.22;
+  const areaW = w - padX * 2;
+  const areaH = h - padY * 2;
+  const mid = h * 0.5;
+  const n = history.length;
+  const gap = 2;
+  const slot = areaW / n;
+  const barW = Math.max(1.5, slot - gap);
+  const maxH = areaH * 0.48;
+
+  for (let i = 0; i < n; i += 1) {
+    const amp = Math.max(0.03, history[i]);
+    const bh = amp * maxH;
+    const x = padX + i * slot + gap * 0.5;
+    const age = i / (n - 1);
+    const a = 0.45 + age * 0.55;
+    ctx.fillStyle = `rgba(255,255,255,${a.toFixed(3)})`;
+    ctx.fillRect(x, mid - bh, barW, bh * 2);
+  }
+}
+
+function sampleAnalyserAmp(analyser, timeData) {
+  analyser.getByteTimeDomainData(timeData);
+  let sum = 0;
+  for (let i = 0; i < timeData.length; i += 1) {
+    const v = (timeData[i] - 128) / 128;
+    sum += v * v;
+  }
+  // Gain percettivo per voci / ambienti deboli
+  return Math.min(1, Math.sqrt(sum / timeData.length) * 3.8);
 }
 
 function fadeOpacity(mesh, from, to, duration = FADE_MS) {
@@ -67,57 +127,33 @@ function fadeOpacity(mesh, from, to, duration = FADE_MS) {
   });
 }
 
-function makeAudioTexture(asset) {
-  const w = 512;
-  const h = 360;
+function createAudioCard(asset) {
+  // Stesso footprint di una foto/video orizzontale tipica (aspect ~1.4)
+  const baseH = 2.2;
+  const baseW = baseH * 1.4;
+
   const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "#0a0a0a";
-  ctx.fillRect(0, 0, w, h);
-
-  // Cornice TAC
-  ctx.strokeStyle = "rgba(210,220,230,0.55)";
-  ctx.lineWidth = 3;
-  ctx.strokeRect(18, 18, w - 36, h - 36);
-
-  // Waveform stilizzata
-  const bars = 36;
-  const baseY = h * 0.52;
-  ctx.fillStyle = "rgba(200,210,220,0.72)";
-  for (let i = 0; i < bars; i += 1) {
-    const t = i / (bars - 1);
-    const n = Math.abs(Math.sin(t * 17.2) * 0.55 + Math.sin(t * 41.0) * 0.35);
-    const bh = 18 + n * 90;
-    const x = 48 + t * (w - 96);
-    ctx.fillRect(x, baseY - bh * 0.5, 6, bh);
-  }
-
-  ctx.fillStyle = "rgba(230,235,240,0.9)";
-  ctx.font = "600 28px VT323, monospace";
-  ctx.textAlign = "center";
-  ctx.fillText("AUDIO", w / 2, 64);
-  ctx.font = "400 22px VT323, monospace";
-  ctx.fillStyle = "rgba(180,190,200,0.85)";
-  const label = displayMediaName(asset).slice(0, 28);
-  ctx.fillText(label, w / 2, h - 48);
+  canvas.width = 896;
+  canvas.height = 640;
+  const ctx = canvas.getContext("2d", { alpha: true });
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
+  tex.premultiplyAlpha = true;
   tex.needsUpdate = true;
-  return tex;
-}
 
-function createAudioCard(asset) {
-  const tex = makeAudioTexture(asset);
-  const baseW = 2.8;
-  const baseH = 2.0;
   const geo = new THREE.PlaneGeometry(baseW, baseH, 1, 1);
-  const mat = createMediaMaterial(tex, {
-    saturation: 0.35,
-    contrast: 1.35,
-    brightness: 1.15,
+  geo.userData.width = baseW;
+  geo.userData.height = baseH;
+  const mat = new THREE.MeshBasicMaterial({
+    map: tex,
+    transparent: true,
+    opacity: 1,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+    toneMapped: false,
+    alphaTest: 0.02,
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.userData.asset = asset;
@@ -125,10 +161,16 @@ function createAudioCard(asset) {
   mesh.userData.baseH = baseH;
   mesh.userData.mediaScale = 1;
   mesh.userData.isAudioCard = true;
+  mesh.userData.canvas = canvas;
+  mesh.userData.texture = tex;
+  mesh.userData.liveHistory = new Float32Array(LIVE_BARS).fill(0.04);
   mesh.userData.homePosition = new THREE.Vector3(0, 0, 0);
   mesh.userData.homeQuaternion = new THREE.Quaternion();
   mesh.userData.slideshowParent = null;
+  mesh.renderOrder = 40;
   mesh.visible = false;
+  drawLiveWaveform(canvas, mesh.userData.liveHistory);
+  tex.needsUpdate = true;
   return mesh;
 }
 
@@ -185,6 +227,8 @@ export function createAutoplayController(opts) {
   let currentMesh = null;
   let savedCam = null;
   let activeClip = null;
+  let activeGain = null;
+  let activeAudioCtx = null;
   /** Indice playlist richiesto dallo scrub della mappa (null = nessuno). */
   let seekIndex = null;
   const audioCards = new Map();
@@ -231,11 +275,16 @@ export function createAutoplayController(opts) {
     seekIndex = playlistIndexForTrack(idx, list);
     stopClip();
     const asset = list[seekIndex];
-    if (asset && Number.isFinite(Number(asset.trackIndex))) {
-      onProgress?.(Number(asset.trackIndex));
-    } else {
-      onProgress?.(idx);
-    }
+    const at =
+      asset && Number.isFinite(Number(asset.trackIndex))
+        ? Number(asset.trackIndex)
+        : idx;
+    onProgress?.(at);
+  }
+
+  function trackIndexOf(asset, fallback = 0) {
+    const t = Number(asset?.trackIndex);
+    return Number.isFinite(t) ? t : fallback;
   }
 
   function hideSphere() {
@@ -265,24 +314,44 @@ export function createAutoplayController(opts) {
   }
 
   function setClipVolume(vol) {
-    if (!activeClip) return;
-    try {
-      activeClip.volume = clipGainFromSlider(vol);
-    } catch {
-      /* ignore */
+    const g = clipGainFromSlider(vol);
+    if (activeGain) {
+      try {
+        activeGain.gain.value = g;
+      } catch {
+        /* ignore */
+      }
+    }
+    if (activeClip) {
+      try {
+        activeClip.volume = 1;
+      } catch {
+        /* ignore */
+      }
     }
   }
 
   function stopClip() {
-    if (!activeClip) return;
-    try {
-      activeClip.pause();
-      activeClip.removeAttribute("src");
-      activeClip.load?.();
-    } catch {
-      /* ignore */
+    if (activeClip) {
+      try {
+        activeClip.pause();
+        activeClip.removeAttribute("src");
+        activeClip.load?.();
+      } catch {
+        /* ignore */
+      }
     }
     activeClip = null;
+    activeGain = null;
+    if (activeAudioCtx) {
+      const ctx = activeAudioCtx;
+      activeAudioCtx = null;
+      try {
+        ctx.close();
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   /** Piano 2D piatto: usa baseH (non la scala curva della sfera). */
@@ -295,6 +364,7 @@ export function createAutoplayController(opts) {
     _pos.copy(camera.position).addScaledVector(_fwd, dist).addScaledVector(_up, 0.06);
 
     const baseH = mesh?.userData?.baseH || 2.2;
+    // Stessa scala a schermo di foto/video
     const desiredH = 2.15;
     const scale = desiredH / Math.max(baseH, 0.05);
 
@@ -318,7 +388,7 @@ export function createAutoplayController(opts) {
     mesh.userData.slideshowFlat = false;
   }
 
-  async function parkCamera(gen) {
+  async function parkCamera(gen, duration = 1.45) {
     if (aborting(gen)) return;
     const targetDist = 4.2;
     const from = camera.position.clone();
@@ -336,8 +406,8 @@ export function createAutoplayController(opts) {
     await new Promise((resolve) => {
       gsap.to(proxy, {
         t: 1,
-        duration: 1.05,
-        ease: "power2.inOut",
+        duration,
+        ease: "power3.inOut",
         onUpdate: () => {
           if (aborting(gen)) return;
           camera.position.lerpVectors(from, to, proxy.t);
@@ -348,12 +418,57 @@ export function createAutoplayController(opts) {
     });
   }
 
+  /** Fade-out morbido delle media sulla sfera prima dello slideshow. */
+  async function fadeActiveSphere(fromOp, toOp, duration, gen) {
+    const sphere = getSphere();
+    const meshes = (sphere?.activeMeshes || []).filter((m) => m && m.visible);
+    if (!meshes.length) return;
+    for (const m of meshes) setOpacity(m, fromOp);
+
+    if (typeof gsap === "undefined") {
+      for (const m of meshes) setOpacity(m, toOp);
+      return;
+    }
+
+    const proxy = { o: fromOp };
+    await new Promise((resolve) => {
+      gsap.to(proxy, {
+        o: toOp,
+        duration,
+        ease: "power2.inOut",
+        onUpdate: () => {
+          if (aborting(gen)) return;
+          for (const m of meshes) setOpacity(m, proxy.o);
+        },
+        onComplete: resolve,
+      });
+    });
+  }
+
+  async function enterAutoplay(gen) {
+    // Camera + dissolvenza sfera in parallelo
+    await Promise.all([
+      parkCamera(gen, 1.5),
+      fadeActiveSphere(1, 0, 1.35, gen),
+    ]);
+    if (aborting(gen)) return;
+    hideSphere();
+    // Opacità piene per quando si torna dalla slideshow
+    const sphere = getSphere();
+    for (const m of sphere?.allMeshes || []) setOpacity(m, 1);
+  }
+
   function ensureAudioCard(asset) {
     const key = assetKey(asset);
     let mesh = audioCards.get(key);
-    if (mesh) return mesh;
-    mesh = createAudioCard(asset);
-    audioCards.set(key, mesh);
+    if (!mesh) {
+      mesh = createAudioCard(asset);
+      audioCards.set(key, mesh);
+    }
+    // Reset history per ogni nuova slide
+    mesh.userData.liveHistory = new Float32Array(LIVE_BARS).fill(0.04);
+    drawLiveWaveform(mesh.userData.canvas, mesh.userData.liveHistory);
+    if (mesh.userData.texture) mesh.userData.texture.needsUpdate = true;
     return mesh;
   }
 
@@ -425,16 +540,50 @@ export function createAutoplayController(opts) {
     if (interrupted(gen)) return;
   }
 
-  async function playAudioSlide(asset, gen) {
+  async function playAudioSlide(asset, gen, mesh) {
     stopClip();
-    const el = new Audio(asset.path);
+
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const el = new Audio(encodeMediaPath(asset.path));
     el.preload = "auto";
-    el.volume = clipGainFromSlider(getSoundVolume?.() ?? 0.5);
+    el.crossOrigin = "anonymous";
+    el.volume = 1;
     activeClip = el;
+
+    let analyser = null;
+    let timeData = null;
+    const history =
+      mesh.userData.liveHistory || new Float32Array(LIVE_BARS).fill(0.04);
+    mesh.userData.liveHistory = history;
+
+    if (AC) {
+      try {
+        const ac = new AC();
+        activeAudioCtx = ac;
+        if (ac.state === "suspended") await ac.resume();
+        const src = ac.createMediaElementSource(el);
+        analyser = ac.createAnalyser();
+        analyser.fftSize = 512;
+        analyser.smoothingTimeConstant = 0.55;
+        const gain = ac.createGain();
+        activeGain = gain;
+        gain.gain.value = clipGainFromSlider(getSoundVolume?.() ?? 0.5);
+        src.connect(analyser);
+        analyser.connect(gain);
+        gain.connect(ac.destination);
+        timeData = new Uint8Array(analyser.fftSize);
+      } catch (err) {
+        console.warn("[autoplay] live analyser failed", err);
+        activeGain = null;
+        el.volume = clipGainFromSlider(getSoundVolume?.() ?? 0.5);
+      }
+    } else {
+      el.volume = clipGainFromSlider(getSoundVolume?.() ?? 0.5);
+    }
 
     let durationSec = Number(asset.duration);
     if (!Number.isFinite(durationSec) || durationSec <= 0) {
-      durationSec = await probeAudioDuration(asset.path);
+      durationSec = await probeAudioDuration(encodeMediaPath(asset.path));
     }
 
     try {
@@ -444,7 +593,44 @@ export function createAutoplayController(opts) {
     }
 
     const dwell = Math.min(24000, Math.max(2200, durationSec * 1000 + 350));
-    const ok = await sleep(dwell, () => interrupted(gen));
+    const t0 = performance.now();
+    let ok = true;
+    let lastPush = 0;
+
+    while (performance.now() - t0 < dwell) {
+      if (interrupted(gen)) {
+        ok = false;
+        break;
+      }
+
+      const now = performance.now();
+      // ~28 sample/sec: scorrimento tipo memo
+      if (now - lastPush >= 36) {
+        lastPush = now;
+        let amp = 0.04;
+        if (analyser && timeData) {
+          amp = sampleAnalyserAmp(analyser, timeData);
+        } else {
+          // Fallback debole senza analyser
+          amp = 0.08 + Math.random() * 0.12;
+        }
+        // Lieve smoothing sull’ultima barra
+        const prev = history[history.length - 1] || 0.04;
+        const smoothed = prev * 0.35 + amp * 0.65;
+        history.copyWithin(0, 1);
+        history[history.length - 1] = smoothed;
+        drawLiveWaveform(mesh.userData.canvas, history);
+        if (mesh.userData.texture) mesh.userData.texture.needsUpdate = true;
+      }
+
+      await sleep(16, () => interrupted(gen));
+      if (interrupted(gen)) {
+        ok = false;
+        break;
+      }
+      if (el.ended) break;
+    }
+
     stopClip();
     return ok;
   }
@@ -506,7 +692,8 @@ export function createAutoplayController(opts) {
 
     const zoneId = Number(asset.zone) || 1;
     onZone?.(zoneId);
-    onProgress?.(Number.isFinite(asset.trackIndex) ? asset.trackIndex : 0);
+    // Pallino = posizione del contenuto corrente (niente corsa autonoma sul path)
+    onProgress?.(trackIndexOf(asset, 0));
     hideSphere();
 
     await sleep(32, () => interrupted(gen));
@@ -528,7 +715,7 @@ export function createAutoplayController(opts) {
     onCaption?.(mediaHoverLines(asset), mesh);
 
     if (asset.kind === "audio") {
-      await playAudioSlide(asset, gen);
+      await playAudioSlide(asset, gen, mesh);
       return;
     }
 
@@ -566,9 +753,8 @@ export function createAutoplayController(opts) {
     onCaption?.(null, null);
     seekIndex = null;
 
-    await parkCamera(gen);
+    await enterAutoplay(gen);
     if (aborting(gen)) return;
-    hideSphere();
 
     let i = 0;
     let first = true;
@@ -582,7 +768,14 @@ export function createAutoplayController(opts) {
       first = false;
       if (aborting(gen)) break;
       if (seekIndex != null) continue;
+      const prev = i;
       i = (i + 1) % list.length;
+      // Fine playlist: pallino scompare in fondo e ricompare all’inizio (no ritorno indietro)
+      if (i === 0 && prev === list.length - 1) {
+        onProgress?.(-1);
+        await sleep(380, () => interrupted(gen));
+        if (interrupted(gen)) continue;
+      }
       await sleep(120, () => interrupted(gen));
     }
   }
