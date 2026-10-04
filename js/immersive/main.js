@@ -17,6 +17,7 @@ import {
 import { createZoneAmbient } from "./zoneAmbient.js";
 import { createHudSidebar } from "./hudSidebar.js";
 import { createMediaHover } from "./mediaHover.js";
+import { armTypeSounds, playTypeClick } from "./typeSounds.js";
 
 const state = {
   data: null,
@@ -145,11 +146,15 @@ function bindStartGate() {
   if (title) {
     title.textContent = "";
     title.classList.add("is-typing");
+    armTypeSounds();
     let i = 0;
     const type = () => {
       if (i < fullText.length) {
         i += 1;
+        const ch = fullText[i - 1] || "";
         title.textContent = fullText.slice(0, i);
+        // Click tasto in sync con ogni carattere (spazio = thud più cupo)
+        playTypeClick({ space: ch === " ", gain: ch === " " ? 0.14 : 0.24 });
         // Ultima lettera: cursore via nello stesso frame
         if (i === fullText.length) {
           title.classList.remove("is-typing");
@@ -157,7 +162,6 @@ function bindStartGate() {
           window.setTimeout(() => btn.classList.add("is-in"), 1000);
           return;
         }
-        const ch = fullText[i - 1] || "";
         const progress = fullText.length ? i / fullText.length : 0;
         const endSlow = progress > 0.62 ? 1 + (progress - 0.62) * 4.5 : 1;
         const base = (ch === " " ? 52 : 58) * endSlow;
