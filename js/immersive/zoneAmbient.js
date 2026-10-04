@@ -77,7 +77,7 @@ export function createZoneAmbient() {
   let index = 0;
   let current = null; // { el, src, gain }
   let pending = null;
-  let volume = 0.72;
+  let volume = 0.5;
   let playing = false;
   let crossfading = false;
   let gen = 0;

@@ -73,7 +73,7 @@ function fireClick(ac, { space = false, gain = 0.22 } = {}) {
   hp.frequency.value = space ? 180 : 600;
 
   const g = ac.createGain();
-  const peak = Math.min(0.45, Math.max(0.05, gain)) * (space ? 0.55 : 1);
+  const peak = Math.min(0.85, Math.max(0.08, gain)) * (space ? 0.62 : 1);
   g.gain.setValueAtTime(0.0001, t0);
   g.gain.exponentialRampToValueAtTime(peak, t0 + 0.004);
   g.gain.exponentialRampToValueAtTime(0.0001, t0 + (space ? 0.045 : 0.028));
@@ -84,7 +84,7 @@ function fireClick(ac, { space = false, gain = 0.22 } = {}) {
   osc.frequency.value = space ? 110 + Math.random() * 30 : 240 + Math.random() * 120;
   const og = ac.createGain();
   og.gain.setValueAtTime(0.0001, t0);
-  og.gain.exponentialRampToValueAtTime(peak * 0.18, t0 + 0.003);
+  og.gain.exponentialRampToValueAtTime(peak * 0.28, t0 + 0.003);
   og.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.018);
 
   src.connect(bp);

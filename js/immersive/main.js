@@ -77,13 +77,20 @@ async function boot() {
         if (state.autoplayOn) return;
         transitionToZone(zone);
       },
-      onSoundChange: (vol) => state.ambient.setVolume(vol),
+      onSoundChange: (vol) => {
+        state.ambient.setVolume(vol);
+        // In autoplay regola anche la clip audio corrente
+        state.autoplay?.setClipVolume?.(vol);
+      },
       onHeartChange: (vol) => {
         state.audio.setVolume(vol);
         if (state.started) ensureHeartbeat();
       },
       onAutoplayChange: (on) => {
         void setAutoplay(on);
+      },
+      onTrackSeek: (trackIndex) => {
+        state.autoplay?.seekToTrackIndex?.(trackIndex);
       },
     });
 
@@ -214,7 +221,7 @@ function bindStartGate() {
         const ch = fullText[i - 1] || "";
         title.textContent = fullText.slice(0, i);
         // Click tasto in sync con ogni carattere (spazio = thud più cupo)
-        playTypeClick({ space: ch === " ", gain: ch === " " ? 0.14 : 0.24 });
+        playTypeClick({ space: ch === " ", gain: ch === " " ? 0.38 : 0.62 });
         // Ultima lettera: cursore via nello stesso frame
         if (i === fullText.length) {
           title.classList.remove("is-typing");

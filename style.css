@@ -231,7 +231,7 @@ body.is-entered .hud-root {
 
 .hud {
   pointer-events: auto;
-  width: min(12.25rem, 28vw);
+  width: min(18.5rem, 42vw);
   height: 100vh;
   display: flex;
   flex-direction: column;
@@ -300,6 +300,17 @@ body.is-entered .hud-root {
   flex: 1 1 auto;
   min-height: 8rem;
   display: block;
+  pointer-events: none;
+  touch-action: none;
+}
+
+.hud-track.is-scrubbable {
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.hud-track.is-scrubbable:active {
+  cursor: grabbing;
 }
 
 .hud-orient {

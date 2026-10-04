@@ -15,7 +15,7 @@ export function createHeartbeatAudio() {
   let enabled = false;
   let nextBeatIndex = 0;
   let visualOffset = 0;
-  let volume = 0.55;
+  let volume = 0.5;
   let master = null;
   let filter = null;
   let shaper = null;

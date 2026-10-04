@@ -185,6 +185,8 @@ export function createAutoplayController(opts) {
   let currentMesh = null;
   let savedCam = null;
   let activeClip = null;
+  /** Indice playlist richiesto dallo scrub della mappa (null = nessuno). */
+  let seekIndex = null;
   const audioCards = new Map();
 
   const _fwd = new THREE.Vector3();
@@ -194,6 +196,46 @@ export function createAutoplayController(opts) {
 
   function aborting(gen) {
     return !running || gen !== generation;
+  }
+
+  function interrupted(gen) {
+    return aborting(gen) || seekIndex != null;
+  }
+
+  function playlistIndexForTrack(trackIdx, list) {
+    if (!list?.length) return 0;
+    let bestI = 0;
+    let bestD = Infinity;
+    let hasTrack = false;
+    for (let i = 0; i < list.length; i += 1) {
+      const ti = Number(list[i].trackIndex);
+      if (!Number.isFinite(ti)) continue;
+      hasTrack = true;
+      const d = Math.abs(ti - trackIdx);
+      if (d < bestD) {
+        bestD = d;
+        bestI = i;
+      }
+    }
+    if (hasTrack) return bestI;
+    // Fallback: mappa indice GPX → posizione in playlist
+    const t = Math.min(1, Math.max(0, trackIdx / 150));
+    return Math.round(t * (list.length - 1));
+  }
+
+  function seekToTrackIndex(trackIdx) {
+    if (!running) return;
+    const list = getPlaylist?.() || [];
+    if (!list.length) return;
+    const idx = Math.max(0, Math.round(Number(trackIdx) || 0));
+    seekIndex = playlistIndexForTrack(idx, list);
+    stopClip();
+    const asset = list[seekIndex];
+    if (asset && Number.isFinite(Number(asset.trackIndex))) {
+      onProgress?.(Number(asset.trackIndex));
+    } else {
+      onProgress?.(idx);
+    }
   }
 
   function hideSphere() {
@@ -213,6 +255,21 @@ export function createAutoplayController(opts) {
       const on = (sphere.activeMeshes || []).includes(mesh);
       mesh.visible = on;
       setOpacity(mesh, 1);
+    }
+  }
+
+  function clipGainFromSlider(vol) {
+    const v = Math.min(1, Math.max(0, Number(vol) || 0));
+    // Un filo sopra lo slider SOUND, ma 0 resta muto
+    return Math.min(1, v * 1.75);
+  }
+
+  function setClipVolume(vol) {
+    if (!activeClip) return;
+    try {
+      activeClip.volume = clipGainFromSlider(vol);
+    } catch {
+      /* ignore */
     }
   }
 
@@ -365,16 +422,14 @@ export function createAutoplayController(opts) {
     mesh.visible = true;
     setOpacity(mesh, 0);
     await fadeOpacity(mesh, 0, 1, FADE_MS);
-    if (aborting(gen)) return;
+    if (interrupted(gen)) return;
   }
 
   async function playAudioSlide(asset, gen) {
     stopClip();
     const el = new Audio(asset.path);
     el.preload = "auto";
-    // Un po’ più alti del volume SOUND del menù
-    const base = getSoundVolume?.() ?? 0.72;
-    el.volume = Math.min(1, Math.max(0.82, base * 1.75));
+    el.volume = clipGainFromSlider(getSoundVolume?.() ?? 0.5);
     activeClip = el;
 
     let durationSec = Number(asset.duration);
@@ -389,7 +444,7 @@ export function createAutoplayController(opts) {
     }
 
     const dwell = Math.min(24000, Math.max(2200, durationSec * 1000 + 350));
-    const ok = await sleep(dwell, () => aborting(gen));
+    const ok = await sleep(dwell, () => interrupted(gen));
     stopClip();
     return ok;
   }
@@ -446,7 +501,7 @@ export function createAutoplayController(opts) {
       await fadeOpacity(currentMesh, 1, 0, FADE_MS);
       shelveMesh(currentMesh);
       currentMesh = null;
-      if (aborting(gen)) return;
+      if (interrupted(gen)) return;
     }
 
     const zoneId = Number(asset.zone) || 1;
@@ -454,21 +509,21 @@ export function createAutoplayController(opts) {
     onProgress?.(Number.isFinite(asset.trackIndex) ? asset.trackIndex : 0);
     hideSphere();
 
-    await sleep(32, () => aborting(gen));
-    if (aborting(gen)) return;
+    await sleep(32, () => interrupted(gen));
+    if (interrupted(gen)) return;
 
     const mesh = resolveMesh(asset);
     if (!mesh) {
       onCaption?.(mediaHoverLines(asset), null);
       hideSphere();
-      await sleep(IMAGE_DWELL_MS * 0.55, () => aborting(gen));
+      await sleep(IMAGE_DWELL_MS * 0.55, () => interrupted(gen));
       return;
     }
 
     hideSphere();
     currentMesh = mesh;
     await presentMesh(mesh, gen);
-    if (aborting(gen)) return;
+    if (interrupted(gen)) return;
 
     onCaption?.(mediaHoverLines(asset), mesh);
 
@@ -491,7 +546,7 @@ export function createAutoplayController(opts) {
       asset.kind === "video"
         ? Math.min(VIDEO_DWELL_MS, Math.max(2800, (Number(asset.duration) || 5) * 1000))
         : IMAGE_DWELL_MS;
-    await sleep(first ? dwell + 350 : dwell, () => aborting(gen));
+    await sleep(first ? dwell + 350 : dwell, () => interrupted(gen));
   }
 
   async function runLoop(gen) {
@@ -509,6 +564,7 @@ export function createAutoplayController(opts) {
     if (controls) controls.enabled = false;
     setSpinEnabled?.(false);
     onCaption?.(null, null);
+    seekIndex = null;
 
     await parkCamera(gen);
     if (aborting(gen)) return;
@@ -517,17 +573,24 @@ export function createAutoplayController(opts) {
     let i = 0;
     let first = true;
     while (!aborting(gen)) {
+      if (seekIndex != null) {
+        i = seekIndex;
+        seekIndex = null;
+        first = false;
+      }
       await showItem(list[i], gen, { first });
       first = false;
       if (aborting(gen)) break;
+      if (seekIndex != null) continue;
       i = (i + 1) % list.length;
-      await sleep(120, () => aborting(gen));
+      await sleep(120, () => interrupted(gen));
     }
   }
 
   async function stop() {
     running = false;
     generation += 1;
+    seekIndex = null;
     stopClip();
     onCaption?.(null, null);
 
@@ -563,6 +626,8 @@ export function createAutoplayController(opts) {
       return currentMesh;
     },
     layoutCaption,
+    setClipVolume,
+    seekToTrackIndex,
     async start() {
       if (running) return;
       running = true;

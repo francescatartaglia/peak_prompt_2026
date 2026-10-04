@@ -2,11 +2,12 @@
 .DS_Store
 **/.DS_Store
 
-# Media assets (photos, video, audio)
-assets/media/
-
-# Apple Health export (very large + personal)
+# Apple Health export (very large + personal; build-only, not used by the site)
 assets/apple_health_export/
+
+# Original iPhone videos — the site plays phone/web/*.mp4 instead
+assets/media/phone/*.MOV
+assets/media/phone/*.mov
 
 # Optional local caches / env
 .env

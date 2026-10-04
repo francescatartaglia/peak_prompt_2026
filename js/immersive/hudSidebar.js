@@ -91,19 +91,20 @@ function bindHorizontalSlider(el, { value, onChange, valueEl } = {}) {
 
 /**
  * @param {HTMLElement} root
- * @param {{ track?: any[], startZone?: number, soundVol?: number, heartVol?: number, onZoneChange?: Function, onSoundChange?: Function, onHeartChange?: Function, onAutoplayChange?: Function, title?: string }} opts
+ * @param {{ track?: any[], startZone?: number, soundVol?: number, heartVol?: number, onZoneChange?: Function, onSoundChange?: Function, onHeartChange?: Function, onAutoplayChange?: Function, onTrackSeek?: Function, title?: string }} opts
  */
 export function createHudSidebar(
   root,
   {
     track = [],
     startZone = 1,
-    soundVol = 0.72,
-    heartVol = 0.55,
+    soundVol = 0.5,
+    heartVol = 0.5,
     onZoneChange,
     onSoundChange,
     onHeartChange,
     onAutoplayChange,
+    onTrackSeek,
     title = "PEAK PROMPT",
   } = {}
 ) {
@@ -224,48 +225,61 @@ export function createHudSidebar(
     }
 
     const accent = zoneConfig(zone).accent;
-
-    // Dimmed full track
-    ctx.beginPath();
-    ctx.strokeStyle = "rgba(180, 190, 200, 0.28)";
-    ctx.lineWidth = 2.2;
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
-    for (let i = 0; i < pts.length; i += 1) {
-      const x = pts[i].x * cssW;
-      const y = pts[i].y * cssH;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
 
-    // Highlight edges assigned to the selected zone (every edge maps to exactly one
-    // zone via the start point, so the full route lights up across Z1–Z4).
-    ctx.strokeStyle = accent;
-    ctx.lineWidth = 3.2;
-    ctx.shadowColor = accent;
-    ctx.shadowBlur = 8;
-    let drawing = false;
-    for (let i = 0; i < pts.length - 1; i += 1) {
-      const edgeZone = pts[i].zone;
-      const x0 = pts[i].x * cssW;
-      const y0 = pts[i].y * cssH;
-      const x1 = pts[i + 1].x * cssW;
-      const y1 = pts[i + 1].y * cssH;
-      if (edgeZone === zone) {
-        if (!drawing) {
-          ctx.beginPath();
-          ctx.moveTo(x0, y0);
-          drawing = true;
-        }
-        ctx.lineTo(x1, y1);
-      } else if (drawing) {
+    if (autoplay) {
+      // Autoplay: tutto il percorso colorato per zona (sempre visibile)
+      for (let i = 0; i < pts.length - 1; i += 1) {
+        const z = pts[i].zone;
+        const col = zoneConfig(z).accent;
+        ctx.beginPath();
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 3.1;
+        ctx.moveTo(pts[i].x * cssW, pts[i].y * cssH);
+        ctx.lineTo(pts[i + 1].x * cssW, pts[i + 1].y * cssH);
         ctx.stroke();
-        drawing = false;
       }
+    } else {
+      // Dimmed full track
+      ctx.beginPath();
+      ctx.strokeStyle = "rgba(180, 190, 200, 0.28)";
+      ctx.lineWidth = 2.2;
+      for (let i = 0; i < pts.length; i += 1) {
+        const x = pts[i].x * cssW;
+        const y = pts[i].y * cssH;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+
+      // Solo la zona selezionata in evidenza
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 3.2;
+      ctx.shadowColor = accent;
+      ctx.shadowBlur = 8;
+      let drawing = false;
+      for (let i = 0; i < pts.length - 1; i += 1) {
+        const edgeZone = pts[i].zone;
+        const x0 = pts[i].x * cssW;
+        const y0 = pts[i].y * cssH;
+        const x1 = pts[i + 1].x * cssW;
+        const y1 = pts[i + 1].y * cssH;
+        if (edgeZone === zone) {
+          if (!drawing) {
+            ctx.beginPath();
+            ctx.moveTo(x0, y0);
+            drawing = true;
+          }
+          ctx.lineTo(x1, y1);
+        } else if (drawing) {
+          ctx.stroke();
+          drawing = false;
+        }
+      }
+      if (drawing) ctx.stroke();
+      ctx.shadowBlur = 0;
     }
-    if (drawing) ctx.stroke();
-    ctx.shadowBlur = 0;
 
     // Endpoint markers
     const a = pts[0];
@@ -274,7 +288,7 @@ export function createHudSidebar(
     ctx.beginPath();
     ctx.arc(a.x * cssW, a.y * cssH, 3, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = accent;
+    ctx.fillStyle = zoneConfig(b.zone || 4).accent;
     ctx.beginPath();
     ctx.arc(b.x * cssW, b.y * cssH, 3.5, 0, Math.PI * 2);
     ctx.fill();
@@ -282,14 +296,15 @@ export function createHudSidebar(
     // Pallino progresso (autoplay / posizione sul percorso)
     if (progressIndex >= 0 && progressIndex < pts.length) {
       const p = pts[progressIndex];
+      const dotAccent = zoneConfig(p.zone || zone).accent;
       ctx.fillStyle = "#ffffff";
-      ctx.shadowColor = accent;
+      ctx.shadowColor = dotAccent;
       ctx.shadowBlur = 10;
       ctx.beginPath();
       ctx.arc(p.x * cssW, p.y * cssH, 4.2, 0, Math.PI * 2);
       ctx.fill();
       ctx.shadowBlur = 0;
-      ctx.strokeStyle = accent;
+      ctx.strokeStyle = dotAccent;
       ctx.lineWidth = 1.4;
       ctx.beginPath();
       ctx.arc(p.x * cssW, p.y * cssH, 5.5, 0, Math.PI * 2);
@@ -307,6 +322,31 @@ export function createHudSidebar(
     root.classList.toggle("is-autoplay", autoplay);
     if (zoneSlider) zoneSlider.classList.toggle("is-locked", autoplay);
     if (zoneRange) zoneRange.disabled = autoplay;
+    if (canvas) {
+      canvas.classList.toggle("is-scrubbable", autoplay);
+      canvas.style.pointerEvents = autoplay ? "auto" : "none";
+    }
+    drawTrack();
+  }
+
+  function nearestTrackIndex(clientX, clientY) {
+    if (!canvas || pts.length < 1) return 0;
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return progressIndex >= 0 ? progressIndex : 0;
+    const nx = (clientX - rect.left) / rect.width;
+    const ny = (clientY - rect.top) / rect.height;
+    let best = 0;
+    let bestD = Infinity;
+    for (let i = 0; i < pts.length; i += 1) {
+      const dx = pts[i].x - nx;
+      const dy = pts[i].y - ny;
+      const d = dx * dx + dy * dy;
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    return best;
   }
 
   function paintZone() {
@@ -363,6 +403,35 @@ export function createHudSidebar(
     });
   });
   autoplayBtn?.addEventListener("click", () => setAutoplay(!autoplay));
+
+  // Scrubbing pallino sul percorso (solo in autoplay)
+  let scrubbing = false;
+  function scrubTo(clientX, clientY, { commit = false } = {}) {
+    if (!autoplay || !pts.length) return;
+    const idx = nearestTrackIndex(clientX, clientY);
+    setTrackProgress(idx);
+    if (commit) onTrackSeek?.(idx);
+  }
+  canvas?.addEventListener("pointerdown", (e) => {
+    if (!autoplay) return;
+    e.preventDefault();
+    e.stopPropagation();
+    scrubbing = true;
+    canvas.setPointerCapture?.(e.pointerId);
+    scrubTo(e.clientX, e.clientY, { commit: false });
+  });
+  canvas?.addEventListener("pointermove", (e) => {
+    if (!scrubbing || !autoplay) return;
+    e.preventDefault();
+    scrubTo(e.clientX, e.clientY, { commit: false });
+  });
+  const endScrub = (e) => {
+    if (!scrubbing) return;
+    scrubbing = false;
+    if (autoplay) scrubTo(e.clientX, e.clientY, { commit: true });
+  };
+  canvas?.addEventListener("pointerup", endScrub);
+  canvas?.addEventListener("pointercancel", endScrub);
 
   const soundSlider = bindHorizontalSlider(root.querySelector("[data-sound-slider]"), {
     value: soundVol,
