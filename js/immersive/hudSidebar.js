@@ -91,7 +91,7 @@ function bindHorizontalSlider(el, { value, onChange, valueEl } = {}) {
 
 /**
  * @param {HTMLElement} root
- * @param {{ track?: any[], startZone?: number, soundVol?: number, heartVol?: number, onZoneChange?: Function, onSoundChange?: Function, onHeartChange?: Function, title?: string }} opts
+ * @param {{ track?: any[], startZone?: number, soundVol?: number, heartVol?: number, onZoneChange?: Function, onSoundChange?: Function, onHeartChange?: Function, onAutoplayChange?: Function, title?: string }} opts
  */
 export function createHudSidebar(
   root,
@@ -103,11 +103,14 @@ export function createHudSidebar(
     onZoneChange,
     onSoundChange,
     onHeartChange,
+    onAutoplayChange,
     title = "PEAK PROMPT",
   } = {}
 ) {
   const pts = projectTrack(track);
   let zone = startZone;
+  let autoplay = false;
+  let progressIndex = -1;
 
   root.innerHTML = `
     <aside class="hud" aria-label="Cardiac CT diagnostics">
@@ -169,6 +172,16 @@ export function createHudSidebar(
             <button type="button" class="hud-h-thumb" data-thumb aria-label="Heartbeat volume"></button>
           </div>
         </div>
+
+        <div class="hud-control hud-autoplay">
+          <button type="button" class="hud-autoplay-btn" data-autoplay aria-pressed="false" aria-label="Autoplay off">
+            <span class="hud-autoplay-label">AUTOPLAY</span>
+            <span class="hud-autoplay-state" data-autoplay-state>OFF</span>
+            <span class="hud-switch" aria-hidden="true">
+              <span class="hud-switch-thumb"></span>
+            </span>
+          </button>
+        </div>
       </section>
 
       <footer class="hud-foot">
@@ -185,6 +198,9 @@ export function createHudSidebar(
   const zoneRangeLabel = root.querySelector("[data-zone-range-label]");
   const zoneFill = root.querySelector("[data-zone-fill]");
   const zoneRange = root.querySelector("[data-zone-range]");
+  const autoplayBtn = root.querySelector("[data-autoplay]");
+  const autoplayState = root.querySelector("[data-autoplay-state]");
+  const zoneSlider = root.querySelector("[data-zone-slider]");
 
   function drawTrack() {
     if (!ctx || !canvas) return;
@@ -262,6 +278,35 @@ export function createHudSidebar(
     ctx.beginPath();
     ctx.arc(b.x * cssW, b.y * cssH, 3.5, 0, Math.PI * 2);
     ctx.fill();
+
+    // Pallino progresso (autoplay / posizione sul percorso)
+    if (progressIndex >= 0 && progressIndex < pts.length) {
+      const p = pts[progressIndex];
+      ctx.fillStyle = "#ffffff";
+      ctx.shadowColor = accent;
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(p.x * cssW, p.y * cssH, 4.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.arc(p.x * cssW, p.y * cssH, 5.5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
+  function paintAutoplay() {
+    if (autoplayBtn) {
+      autoplayBtn.classList.toggle("is-on", autoplay);
+      autoplayBtn.setAttribute("aria-pressed", autoplay ? "true" : "false");
+      autoplayBtn.setAttribute("aria-label", autoplay ? "Autoplay on" : "Autoplay off");
+    }
+    if (autoplayState) autoplayState.textContent = autoplay ? "ON" : "OFF";
+    root.classList.toggle("is-autoplay", autoplay);
+    if (zoneSlider) zoneSlider.classList.toggle("is-locked", autoplay);
+    if (zoneRange) zoneRange.disabled = autoplay;
   }
 
   function paintZone() {
@@ -284,10 +329,40 @@ export function createHudSidebar(
     if (!silent) onZoneChange?.(zone);
   }
 
-  zoneRange?.addEventListener("input", () => setZone(Number(zoneRange.value)));
-  root.querySelectorAll(".hud-zone-mark").forEach((btn) => {
-    btn.addEventListener("click", () => setZone(Number(btn.dataset.zone)));
+  function setAutoplay(next, { silent = false } = {}) {
+    autoplay = !!next;
+    paintAutoplay();
+    if (!autoplay) {
+      progressIndex = -1;
+      drawTrack();
+    }
+    if (!silent) onAutoplayChange?.(autoplay);
+  }
+
+  /** Indice punto GPX (0…n-1) per il pallino sul percorso. */
+  function setTrackProgress(index) {
+    const n = pts.length;
+    if (!n) {
+      progressIndex = -1;
+    } else if (index == null || index < 0) {
+      progressIndex = -1;
+    } else {
+      progressIndex = Math.min(n - 1, Math.max(0, Math.round(index)));
+    }
+    drawTrack();
+  }
+
+  zoneRange?.addEventListener("input", () => {
+    if (autoplay) return;
+    setZone(Number(zoneRange.value));
   });
+  root.querySelectorAll(".hud-zone-mark").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (autoplay) return;
+      setZone(Number(btn.dataset.zone));
+    });
+  });
+  autoplayBtn?.addEventListener("click", () => setAutoplay(!autoplay));
 
   const soundSlider = bindHorizontalSlider(root.querySelector("[data-sound-slider]"), {
     value: soundVol,
@@ -299,11 +374,15 @@ export function createHudSidebar(
   });
 
   paintZone();
+  paintAutoplay();
   window.addEventListener("resize", drawTrack);
 
   return {
     getZone: () => zone,
     setZone,
+    getAutoplay: () => autoplay,
+    setAutoplay,
+    setTrackProgress,
     setSoundVolume: (v) => soundSlider.set(v, { silent: true }),
     setHeartVolume: (v) => heartSlider.set(v, { silent: true }),
     redrawTrack: drawTrack,

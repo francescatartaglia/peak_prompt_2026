@@ -18,6 +18,7 @@ import { createZoneAmbient } from "./zoneAmbient.js";
 import { createHudSidebar } from "./hudSidebar.js";
 import { createMediaHover } from "./mediaHover.js";
 import { armTypeSounds, playTypeClick } from "./typeSounds.js";
+import { createAutoplayController, buildChronoPlaylist } from "./autoplay.js";
 
 const state = {
   data: null,
@@ -28,6 +29,7 @@ const state = {
   sphere: null,
   hud: null,
   mediaHover: null,
+  autoplay: null,
   ambient: createZoneAmbient(),
   fluid: null,
   audio: createHeartbeatAudio(),
@@ -40,6 +42,8 @@ const state = {
   navReady: false,
   /** Dopo click su Start: audio + intro zoom */
   started: false,
+  /** Slideshow autoplay attivo */
+  autoplayOn: false,
   /** Risolto quando sfera + scena sono pronti */
   ready: null,
 };
@@ -69,11 +73,17 @@ async function boot() {
       soundVol: state.ambient.getVolume(),
       heartVol: state.audio.getVolume(),
       title: "PEAK PROMPT",
-      onZoneChange: (zone) => transitionToZone(zone),
+      onZoneChange: (zone) => {
+        if (state.autoplayOn) return;
+        transitionToZone(zone);
+      },
       onSoundChange: (vol) => state.ambient.setVolume(vol),
       onHeartChange: (vol) => {
         state.audio.setVolume(vol);
         if (state.started) ensureHeartbeat();
+      },
+      onAutoplayChange: (on) => {
+        void setAutoplay(on);
       },
     });
 
@@ -105,9 +115,59 @@ async function boot() {
         camera: state.camera,
         domElement: canvas,
         getMeshes: () => state.sphere?.activeMeshes || [],
-        isEnabled: () => state.started && state.navReady,
+        isEnabled: () => state.started && state.navReady && !state.autoplayOn,
       });
     }
+
+    const captionEl = document.getElementById("autoplay-caption");
+    const placeCaption = () => {
+      if (!captionEl?.classList.contains("is-on")) return;
+      const layout = state.autoplay?.layoutCaption?.();
+      if (!layout) return;
+      captionEl.style.transform = "none";
+      captionEl.style.left = `${Math.round(layout.left)}px`;
+      captionEl.style.top = `${Math.round(layout.top)}px`;
+    };
+
+    state.autoplay = createAutoplayController({
+      camera: state.camera,
+      controls: state.controls,
+      scene: state.scene,
+      getSphere: () => state.sphere,
+      getPlaylist: () => buildChronoPlaylist(state.sphere, state.data),
+      findMesh: (asset) => {
+        const key = asset?.id || asset?.path;
+        return (
+          state.sphere?.allMeshes?.find(
+            (m) => (m.userData?.asset?.id || m.userData?.asset?.path) === key
+          ) || null
+        );
+      },
+      onZone: (zoneId) => applyZoneForAutoplay(zoneId),
+      onProgress: (idx) => state.hud?.setTrackProgress(idx),
+      onCaption: (lines) => {
+        if (!captionEl) return;
+        if (!lines) {
+          captionEl.classList.remove("is-on");
+          captionEl.innerHTML = "";
+          captionEl.setAttribute("aria-hidden", "true");
+          return;
+        }
+        captionEl.innerHTML = lines.map((l) => `<div>${l}</div>`).join("");
+        captionEl.classList.add("is-on");
+        captionEl.setAttribute("aria-hidden", "false");
+        placeCaption();
+      },
+      getSoundVolume: () => state.ambient.getVolume(),
+      setSpinEnabled: (on) => {
+        if (spinBoostTween) {
+          spinBoostTween.kill();
+          spinBoostTween = null;
+        }
+        sphereSpinRate = on ? SPHERE_SPIN : 0;
+      },
+    });
+    state.placeCaption = placeCaption;
 
     applyZoneInstant(1);
     for (const mesh of state.sphere.allMeshes) {
@@ -377,8 +437,44 @@ function applyZoneInstant(zoneId) {
   state.hud?.setZone(zoneId, { silent: true });
 }
 
+/** Cambio zona durante autoplay: menù + sfondo + battito; sfera nascosta; no ambient. */
+function applyZoneForAutoplay(zoneId) {
+  const to = zoneConfig(zoneId);
+  const zone = state.data.zones[zoneId];
+  const changed = zoneId !== state.zone;
+
+  state.zone = zoneId;
+  state.avgBpm = zone.avgBpm || to.fallbackBpm;
+  state.sphere.pulseDepth = to.pulseDepth;
+  state.sphere.groupPulse = to.groupPulse;
+  state.audio.setBpm(state.avgBpm);
+  if (state.started) ensureHeartbeat();
+  state.ambient.stop();
+  state.fluid?.setPalette(
+    { a: to.bgA, b: to.bgB, c: to.bgC },
+    { duration: changed ? 0.9 : 0 }
+  );
+  state.fluid?.setSpeed(to.fluidSpeed ?? 1);
+  document.documentElement.style.setProperty("--accent", to.accent);
+  document.documentElement.style.setProperty("--hud-accent", to.accent);
+  state.hud?.setZone(zoneId, { silent: true });
+
+  // Aggiorna media attivi / grade ma non mostrare la sfera
+  if (changed) {
+    setActiveZoneMedia(state.sphere, zoneId);
+    applyDensity(state.sphere, { radius: SPHERE_RADIUS, coverage: to.coverage });
+  }
+  applyShaderGrade(state.sphere, to.saturation, to.contrast, to.brightness ?? 1);
+  if (state.sphere?.group) state.sphere.group.visible = false;
+  for (const mesh of state.sphere?.allMeshes || []) {
+    if (mesh.userData?.slideshowLock) continue;
+    mesh.visible = false;
+  }
+}
+
 /** Cambio zona: swap immagini + rotazione rapida (niente fade). */
 function transitionToZone(zoneId) {
+  if (state.autoplayOn) return;
   if (zoneId === state.zone) return;
 
   const to = zoneConfig(zoneId);
@@ -408,6 +504,41 @@ function transitionToZone(zoneId) {
 
   // Burst di rotazione: le nuove immagini “passano” con lo spin
   boostSphereSpin(1.55, 0.85);
+}
+
+async function setAutoplay(on) {
+  if (!state.started) {
+    state.hud?.setAutoplay(false, { silent: true });
+    return;
+  }
+
+  if (!state.navReady) {
+    if (on) {
+      const waitNav = async () => {
+        while (!state.navReady && state.started) {
+          await new Promise((r) => setTimeout(r, 80));
+        }
+        if (state.hud?.getAutoplay?.()) await setAutoplay(true);
+      };
+      void waitNav();
+    }
+    return;
+  }
+
+  if (on === state.autoplayOn) return;
+  state.autoplayOn = on;
+  state.mediaHover?.hide?.();
+
+  if (on) {
+    state.controls.enabled = false;
+    state.ambient.stop();
+    // Non await: altrimenti non si può spegnere il toggle durante lo slideshow
+    void state.autoplay?.start();
+  } else {
+    await state.autoplay?.stop();
+    if (state.navReady) state.controls.enabled = true;
+    syncZoneAmbient();
+  }
 }
 
 /** Rotazione costante della sfera — mai interrotta. */
@@ -453,19 +584,20 @@ function animate() {
   const elapsed = state.clock.elapsedTime;
   const transport = state.audio.getSyncTime(elapsed);
 
-  if (state.sphere?.group) {
+  if (state.sphere?.group && !state.autoplayOn) {
     state.sphere.group.rotation.y += delta * sphereSpinRate;
   }
   applyHeartbeat(state.sphere, transport, state.avgBpm);
   if (state.started) keepVideosPlaying(state.sphere);
 
-  if (state.navReady && state.controls?.enabled) {
+  if (state.navReady && state.controls?.enabled && !state.autoplayOn) {
     state.controls.update();
   } else if (!state.navReady && state.controls && !state.introTween) {
     state.camera.lookAt(state.controls.target);
   }
 
-  state.mediaHover?.tick?.();
+  if (!state.autoplayOn) state.mediaHover?.tick?.();
+  else state.placeCaption?.();
 
   state.renderer.render(state.scene, state.camera);
 }

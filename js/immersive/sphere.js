@@ -163,6 +163,18 @@ export function bendGeometry(geo, radius, scale = 1) {
   geo.computeVertexNormals();
 }
 
+/** Ripristina il piano 2D (niente curvatura sfera) — per slideshow autoplay. */
+export function flattenGeometry(geo) {
+  const flat = geo?.userData?.flat;
+  if (!flat || !geo?.attributes?.position) return;
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i += 1) {
+    pos.setXYZ(i, flat[i * 3], flat[i * 3 + 1], flat[i * 3 + 2]);
+  }
+  pos.needsUpdate = true;
+  geo.computeVertexNormals();
+}
+
 const _radial = new THREE.Vector3();
 const _up = new THREE.Vector3();
 const _right = new THREE.Vector3();
@@ -490,6 +502,7 @@ function applyCoverageScale(sphere) {
   const cov = sphere.coverage;
   const R = sphere.radius;
   sphere.activeMeshes.forEach((mesh, i) => {
+    if (mesh.userData?.slideshowLock) return;
     const layer = mesh.userData.stackLayer ?? i;
     const base = Math.sqrt(mesh.userData.baseW * mesh.userData.baseH);
     let s = (cell * cov) / Math.max(base, 0.001);
@@ -509,6 +522,7 @@ function applyCoverageScale(sphere) {
 export function setActiveZoneMedia(sphere, zoneId) {
   const active = sphere.byZone[zoneId] || [];
   for (const mesh of sphere.allMeshes) {
+    if (mesh.userData?.slideshowLock) continue;
     const on = active.includes(mesh);
     mesh.visible = on;
     const vh = mesh.userData.videoHandle;
@@ -525,7 +539,9 @@ export function setActiveZoneMedia(sphere, zoneId) {
     }
   }
   sphere.activeMeshes = active;
-  layoutMeshes(active, sphere.radius);
+  // Non rilayoutare mesh in slideshow (sono fuori dalla sfera)
+  const layoutList = active.filter((m) => !m.userData?.slideshowLock);
+  layoutMeshes(layoutList, sphere.radius);
   applyCoverageScale(sphere);
   return active;
 }
@@ -562,6 +578,10 @@ export function applyHeartbeat(sphere, transportTime, bpm) {
   const depth = (sphere.pulseDepth ?? 0.14) * 0.85;
   const pulse = 1 - contraction * depth;
   for (const mesh of sphere.activeMeshes) {
+    if (mesh.userData?.slideshowLock) {
+      tickMediaShaderTime(mesh.material, transportTime);
+      continue;
+    }
     mesh.scale.setScalar(pulse);
     tickMediaShaderTime(mesh.material, transportTime);
   }

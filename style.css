@@ -494,6 +494,82 @@ body.is-entered .hud-root {
   cursor: grabbing;
 }
 
+.hud-autoplay {
+  margin-top: 0.15rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.hud-autoplay-btn {
+  appearance: none;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.25rem 0;
+  border: 0;
+  background: transparent;
+  color: var(--hud-dim);
+  font-family: var(--font-ui);
+  font-size: 0.78rem;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+
+.hud-autoplay-label {
+  flex: 1 1 auto;
+  text-align: left;
+}
+
+.hud-autoplay-state {
+  color: var(--hud-fg);
+  min-width: 1.6em;
+  text-align: right;
+}
+
+.hud-switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 14px;
+  border-radius: 999px;
+  border: 1px solid #666;
+  background: #1a1a1a;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.hud-switch-thumb {
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #bdbdbd;
+  transform: translateY(-50%);
+  transition: left 0.2s ease, background 0.2s ease;
+}
+
+.hud-autoplay-btn.is-on {
+  color: var(--hud-fg);
+}
+
+.hud-autoplay-btn.is-on .hud-switch {
+  background: color-mix(in srgb, var(--hud-accent) 35%, #111);
+  border-color: var(--hud-accent);
+}
+
+.hud-autoplay-btn.is-on .hud-switch-thumb {
+  left: 14px;
+  background: var(--hud-accent);
+}
+
+.hud-zone-slider.is-locked {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
 .hud-foot {
   flex: 0 0 auto;
   display: flex;
@@ -504,6 +580,32 @@ body.is-entered .hud-root {
   color: var(--hud-dim);
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   padding-top: 0.35rem;
+}
+
+/* Autoplay caption — a destra della foto, allineata in alto (pos via JS) */
+.autoplay-caption {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 13;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s ease;
+  font-family: var(--font-ui);
+  font-size: clamp(0.9rem, 1.35vw, 1.1rem);
+  line-height: 1.35;
+  letter-spacing: 0.04em;
+  color: #ffffff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+  white-space: nowrap;
+  text-align: left;
+  max-width: min(40vw, 22rem);
+}
+
+.autoplay-caption.is-on {
+  opacity: 1;
+  visibility: visible;
 }
 
 .hud-ww {
