@@ -292,20 +292,20 @@ function bindStartGate() {
   const runSequence = async () => {
     if (title) {
       await gateMorph(title, fullText, {
-        slowLock: 94,
-        fastLock: 60,
-        scrambleMs: 20,
+        slowLock: 58,
+        fastLock: 36,
+        scrambleMs: 14,
         fastFrom: fullText.indexOf("ITS OWN"),
       });
     }
 
-    await new Promise((r) => setTimeout(r, 272));
+    await new Promise((r) => setTimeout(r, 160));
     btn.classList.add("is-in");
     await gateMorph(btn, ctaText, {
-      slowLock: 95,
-      fastLock: 68,
-      scrambleMs: 24,
-      startDelay: 90,
+      slowLock: 56,
+      fastLock: 40,
+      scrambleMs: 14,
+      startDelay: 48,
     });
 
     await new Promise((r) => setTimeout(r, 280));

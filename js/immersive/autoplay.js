@@ -231,6 +231,8 @@ export function createAutoplayController(opts) {
   let activeAudioCtx = null;
   /** Indice playlist richiesto dallo scrub della mappa (null = nessuno). */
   let seekIndex = null;
+  /** Cursore continuo sul GPX: il pallino non torna indietro tra media vicini. */
+  let pathCursor = 0;
   const audioCards = new Map();
 
   const _fwd = new THREE.Vector3();
@@ -279,12 +281,78 @@ export function createAutoplayController(opts) {
       asset && Number.isFinite(Number(asset.trackIndex))
         ? Number(asset.trackIndex)
         : idx;
+    pathCursor = at;
     onProgress?.(at);
   }
 
   function trackIndexOf(asset, fallback = 0) {
     const t = Number(asset?.trackIndex);
     return Number.isFinite(t) ? t : fallback;
+  }
+
+  /** Max trackIndex in playlist (per chiudere il path prima del wrap). */
+  function maxTrackIndex(list) {
+    let m = 0;
+    for (const a of list || []) {
+      const t = Number(a?.trackIndex);
+      if (Number.isFinite(t) && t > m) m = t;
+    }
+    return m;
+  }
+
+  /**
+   * Avanza il pallino in modo continuo da from→to lungo il GPX
+   * durante la durata della slide (in relazione al media mostrato).
+   */
+  async function travelProgress(fromIdx, toIdx, durationMs, gen) {
+    const a = Number(fromIdx);
+    let b = Number(toIdx);
+    if (!Number.isFinite(a)) return !interrupted(gen);
+    if (!Number.isFinite(b)) b = a;
+    // Sempre avanti lungo il percorso; se to ≤ from, piccolo avanzamento
+    if (b <= a) b = a + 0.9;
+    const dur = Math.max(200, durationMs);
+    const t0 = performance.now();
+    onProgress?.(a);
+    while (!interrupted(gen)) {
+      const u = Math.min(1, (performance.now() - t0) / dur);
+      // Ease leggero in/out per fluidità, senza fermarsi
+      const e = u * u * (3 - 2 * u);
+      onProgress?.(a + (b - a) * e);
+      if (u >= 1) break;
+      await sleep(33, () => interrupted(gen));
+    }
+    if (!interrupted(gen)) {
+      onProgress?.(b);
+      pathCursor = b;
+    }
+    return !interrupted(gen);
+  }
+
+  function travelRangeFor(list, index) {
+    const asset = list[index];
+    const next = list[(index + 1) % list.length];
+    const pathEnd = maxTrackIndex(list);
+    const rawFrom = trackIndexOf(asset, 0);
+    // Nuovo giro (pathCursor azzerato): riparti dal track del primo media
+    const from =
+      index === 0 && pathCursor < 1
+        ? Math.max(0, rawFrom)
+        : Math.max(pathCursor, rawFrom);
+    let to = trackIndexOf(next, from);
+    // Ultimo item: completa fino alla fine del GPX
+    if (index >= list.length - 1) {
+      to = Math.max(from, pathEnd);
+    } else if (to + 5 < from) {
+      to = Math.max(from, pathEnd);
+    }
+    if (to <= from) {
+      // Più media sullo stesso punto GPX: avanza comunque un pezzo di path
+      const remainItems = Math.max(1, list.length - index);
+      const remainPath = Math.max(0.6, pathEnd - from);
+      to = from + remainPath / remainItems;
+    }
+    return { from, to };
   }
 
   function hideSphere() {
@@ -540,7 +608,7 @@ export function createAutoplayController(opts) {
     if (interrupted(gen)) return;
   }
 
-  async function playAudioSlide(asset, gen, mesh) {
+  async function playAudioSlide(asset, gen, mesh, travel = null) {
     stopClip();
 
     const AC = window.AudioContext || window.webkitAudioContext;
@@ -596,6 +664,8 @@ export function createAutoplayController(opts) {
     const t0 = performance.now();
     let ok = true;
     let lastPush = 0;
+    const fromIdx = Number(travel?.from);
+    const toIdx = Number(travel?.to);
 
     while (performance.now() - t0 < dwell) {
       if (interrupted(gen)) {
@@ -604,6 +674,12 @@ export function createAutoplayController(opts) {
       }
 
       const now = performance.now();
+      // Pallino: viaggio continuo lungo il path durante l’audio
+      if (Number.isFinite(fromIdx) && Number.isFinite(toIdx) && toIdx > fromIdx) {
+        const u = Math.min(1, (now - t0) / dwell);
+        const e = u * u * (3 - 2 * u);
+        onProgress?.(fromIdx + (toIdx - fromIdx) * e);
+      }
       // ~28 sample/sec: scorrimento tipo memo
       if (now - lastPush >= 36) {
         lastPush = now;
@@ -631,6 +707,10 @@ export function createAutoplayController(opts) {
       if (el.ended) break;
     }
 
+    if (ok && Number.isFinite(fromIdx) && Number.isFinite(toIdx)) {
+      pathCursor = Math.max(pathCursor, toIdx);
+      onProgress?.(toIdx);
+    }
     stopClip();
     return ok;
   }
@@ -680,7 +760,7 @@ export function createAutoplayController(opts) {
     };
   }
 
-  async function showItem(asset, gen, { first = false } = {}) {
+  async function showItem(asset, gen, { first = false, list = null, index = 0 } = {}) {
     stopClip();
     if (currentMesh) {
       onCaption?.(null, null);
@@ -692,8 +772,13 @@ export function createAutoplayController(opts) {
 
     const zoneId = Number(asset.zone) || 1;
     onZone?.(zoneId);
-    // Pallino = posizione del contenuto corrente (niente corsa autonoma sul path)
-    onProgress?.(trackIndexOf(asset, 0));
+    const travel = list?.length
+      ? travelRangeFor(list, index)
+      : {
+          from: trackIndexOf(asset, 0),
+          to: trackIndexOf(asset, 0) + 0.9,
+        };
+    onProgress?.(travel.from);
     hideSphere();
 
     await sleep(32, () => interrupted(gen));
@@ -703,7 +788,8 @@ export function createAutoplayController(opts) {
     if (!mesh) {
       onCaption?.(mediaHoverLines(asset), null);
       hideSphere();
-      await sleep(IMAGE_DWELL_MS * 0.55, () => interrupted(gen));
+      const missDwell = IMAGE_DWELL_MS * 0.55;
+      await travelProgress(travel.from, travel.to, missDwell, gen);
       return;
     }
 
@@ -715,7 +801,7 @@ export function createAutoplayController(opts) {
     onCaption?.(mediaHoverLines(asset), mesh);
 
     if (asset.kind === "audio") {
-      await playAudioSlide(asset, gen, mesh);
+      await playAudioSlide(asset, gen, mesh, travel);
       return;
     }
 
@@ -733,7 +819,7 @@ export function createAutoplayController(opts) {
       asset.kind === "video"
         ? Math.min(VIDEO_DWELL_MS, Math.max(2800, (Number(asset.duration) || 5) * 1000))
         : IMAGE_DWELL_MS;
-    await sleep(first ? dwell + 350 : dwell, () => interrupted(gen));
+    await travelProgress(travel.from, travel.to, first ? dwell + 350 : dwell, gen);
   }
 
   async function runLoop(gen) {
@@ -752,6 +838,7 @@ export function createAutoplayController(opts) {
     setSpinEnabled?.(false);
     onCaption?.(null, null);
     seekIndex = null;
+    pathCursor = 0;
 
     await enterAutoplay(gen);
     if (aborting(gen)) return;
@@ -764,7 +851,7 @@ export function createAutoplayController(opts) {
         seekIndex = null;
         first = false;
       }
-      await showItem(list[i], gen, { first });
+      await showItem(list[i], gen, { first, list, index: i });
       first = false;
       if (aborting(gen)) break;
       if (seekIndex != null) continue;
@@ -772,6 +859,7 @@ export function createAutoplayController(opts) {
       i = (i + 1) % list.length;
       // Fine playlist: pallino scompare in fondo e ricompare all’inizio (no ritorno indietro)
       if (i === 0 && prev === list.length - 1) {
+        pathCursor = 0;
         onProgress?.(-1);
         await sleep(380, () => interrupted(gen));
         if (interrupted(gen)) continue;
@@ -808,6 +896,7 @@ export function createAutoplayController(opts) {
       controls.enabled = true;
     }
     savedCam = null;
+    pathCursor = 0;
     onProgress?.(-1);
   }
 

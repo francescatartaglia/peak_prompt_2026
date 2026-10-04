@@ -114,12 +114,13 @@ export function createHudSidebar(
   /** Posizione continua lungo il GPX (float indice); -1 = nascosto */
   let progressPos = -1;
   let progressTarget = -1;
-  /** idle | hold | seek | scrub */
+  /** idle | follow | seek | scrub */
   let progressMode = "idle";
   let scrubTarget = 0;
   let progressRaf = 0;
   let lastProgressTs = 0;
-  const SEEK_PER_SEC = 42;
+  const SEEK_PER_SEC = 58;
+  const FOLLOW_SMOOTH = 11;
 
   root.innerHTML = `
     <aside class="hud" aria-label="Cardiac CT diagnostics">
@@ -367,18 +368,23 @@ export function createHudSidebar(
           dirty = true;
         }
       } else if (progressMode === "seek") {
-        // Solo riallineamento al nuovo contenuto / fine scrub — non “corre” da solo
         const delta = progressTarget - progressPos;
         const step = SEEK_PER_SEC * dt;
         if (Math.abs(delta) <= step) {
           progressPos = progressTarget;
-          progressMode = "hold";
+          progressMode = "follow";
         } else {
           progressPos += Math.sign(delta) * step;
         }
         dirty = true;
+      } else if (progressMode === "follow") {
+        // Segue il viaggio continuo emesso dall’autoplay (path reale)
+        const prev = progressPos;
+        const k = 1 - Math.exp(-dt * FOLLOW_SMOOTH);
+        progressPos += (progressTarget - progressPos) * k;
+        progressPos = Math.min(n - 1, Math.max(0, progressPos));
+        dirty = Math.abs(progressPos - prev) > 0.0004;
       }
-      // hold: fermo sul punto del media corrente
 
       if (dirty) drawTrack();
       if (autoplay && (progressPos >= 0 || progressMode === "scrub")) {
@@ -461,7 +467,7 @@ export function createHudSidebar(
   }
 
   /**
-   * Pallino sync al media: -1 = nascosto (restart), altrimenti punto GPX del contenuto.
+   * Pallino sync al viaggio media: -1 = nascosto (restart), altrimenti float GPX.
    * @param {number} index
    * @param {{ immediate?: boolean, seek?: boolean }} [opts]
    */
@@ -479,10 +485,10 @@ export function createHudSidebar(
     const idx = Math.min(n - 1, Math.max(0, Number(index)));
     progressTarget = idx;
 
-    // Ricomparsa all’inizio / primo fix: snap, nessuna corsa
+    // Ricomparsa all’inizio / primo fix: snap
     if (progressPos < 0 || opts.immediate) {
       progressPos = idx;
-      progressMode = autoplay ? "hold" : "idle";
+      progressMode = autoplay ? "follow" : "idle";
       drawTrack();
       ensureProgressLoop();
       return;
@@ -491,17 +497,11 @@ export function createHudSidebar(
     if (opts.seek || progressMode === "scrub") {
       progressMode = "seek";
     } else if (autoplay) {
-      if (idx + 0.05 < progressPos) {
-        // Indietro non animato (restart usa hide); snap al contenuto
-        progressPos = idx;
-        progressMode = "hold";
-        drawTrack();
-      } else if (Math.abs(idx - progressPos) > 0.03) {
-        // Nuovo media più avanti: breve riallineamento al suo punto GPX
-        progressMode = "seek";
-      } else {
-        progressMode = "hold";
+      if (progressMode !== "seek" && progressMode !== "scrub") {
+        progressMode = "follow";
       }
+      // Salto indietro netto (wrap / seek) → riallinea in modo fluido
+      if (idx < progressPos - 6) progressMode = "seek";
     }
 
     ensureProgressLoop();
