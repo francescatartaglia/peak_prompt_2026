@@ -12,7 +12,7 @@
       href="https://fonts.googleapis.com/css2?family=VT323&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="style.css?v=20261004aw" />
+    <link rel="stylesheet" href="style.css?v=20261007j" />
     <script type="importmap">
       {
         "imports": {
@@ -34,22 +34,43 @@
 
     <div id="gate" class="gate" aria-hidden="false">
       <div class="gate-grain" aria-hidden="true"></div>
+
+      <aside class="gate-corner gate-corner--tl" aria-label="Facility and protocol">
+        <div data-gate-line>FACILITY: CARDIOLOGY &amp; TREK DEPT.</div>
+        <div data-gate-line>EXAM ID: CT-2026-991</div>
+        <div data-gate-line>SERIES: 3D CARDIAC RECON</div>
+      </aside>
+
+      <aside class="gate-corner gate-corner--tr" aria-label="Patient details">
+        <div data-gate-line>PATIENT NAME: FRANCESCA TARTAGLIA</div>
+        <div data-gate-line>PATIENT ID: HK-8842</div>
+        <div data-gate-line data-gate-scan>SCAN DATE: 02 OCT 2026</div>
+      </aside>
+
+      <aside class="gate-corner gate-corner--bl" aria-label="Cardiac telemetry">
+        <div data-gate-line data-gate-bpm>BPM RANGE: 87 - 184 BPM</div>
+        <div data-gate-line>ACQUISITION: KV 120 / MA 400</div>
+        <div data-gate-line>SLICE: 0.625MM / ROT: 0.35S</div>
+      </aside>
+
+      <aside class="gate-corner gate-corner--br" id="gate-meta" aria-label="Hike summary">
+        <div data-gate-line>TYPE: TREKKING</div>
+        <div data-gate-line data-gate-duration>DURATION: 02:32:59</div>
+        <div data-gate-line data-gate-distance>DISTANCE: 3.31 KM</div>
+      </aside>
+
       <div class="gate-panel">
         <h1 class="gate-title" id="gate-title" aria-label="EVERY PEAK HAS ITS OWN BEAT"></h1>
-        <div class="gate-subrow">
-          <button type="button" id="gate-start" class="gate-start">[ACCESS CARDIAC REPORT]</button>
-          <div class="gate-meta" id="gate-meta" aria-label="Report summary">
-            <div data-gate-line>NAME: PEAK PROMPT</div>
-            <div data-gate-line>REPORT NUMBER: 01</div>
-            <div data-gate-line>TYPE: TREKKING</div>
-            <div data-gate-line data-gate-duration>DURATION: 2:32:59</div>
-            <div data-gate-line data-gate-distance>DISTANCE: 3,31 KM</div>
-          </div>
-        </div>
+        <button
+          type="button"
+          id="gate-start"
+          class="gate-start"
+          aria-label="[ACCESS CARDIAC REPORT]"
+        ></button>
       </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
-    <script type="module" src="js/immersive/main.js?v=20261004bb"></script>
+    <script type="module" src="js/immersive/main.js?v=20261007i"></script>
   </body>
 </html>

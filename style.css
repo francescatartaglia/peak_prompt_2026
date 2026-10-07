@@ -71,8 +71,10 @@ body.is-entered .hud-root {
   visibility: visible;
 }
 
-/* Splash: nero puro + noise grigio ad alto contrasto */
+/* Splash: DICOM / Cardiac CT header overlay */
 .gate {
+  --gate-ink: #c7c9ca;
+  --gate-ink-dim: #9aa0a4;
   position: fixed;
   inset: 0;
   z-index: 21;
@@ -80,6 +82,9 @@ body.is-entered .hud-root {
   place-items: center;
   background: #000000;
   transition: opacity 1.25s ease, visibility 1.25s ease;
+  font-family: var(--font-ui);
+  text-transform: uppercase;
+  color: var(--gate-ink);
 }
 
 .gate.is-gone {
@@ -118,51 +123,115 @@ body.is-entered .hud-root {
   }
 }
 
+.gate-corner {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 0.14rem;
+  max-width: min(42vw, 28rem);
+  padding: clamp(0.75rem, 2.2vw, 1.35rem);
+  font-family: var(--font-ui);
+  font-size: clamp(0.78rem, 1.55vw, 1.05rem);
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  line-height: 1.2;
+  text-transform: uppercase;
+  color: var(--gate-ink);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.75s ease, visibility 0s linear 0.75s;
+}
+
+.gate-corner.is-in {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.75s ease, visibility 0s linear 0s;
+}
+
+.gate-corner [data-gate-line] {
+  min-height: 1.15em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gate-corner--tl {
+  top: 0;
+  left: 0;
+  align-items: flex-start;
+  text-align: left;
+}
+
+.gate-corner--tr {
+  top: 0;
+  right: 0;
+  align-items: flex-end;
+  text-align: right;
+}
+
+.gate-corner--bl {
+  bottom: 0;
+  left: 0;
+  align-items: flex-start;
+  text-align: left;
+}
+
+.gate-corner--br {
+  bottom: 0;
+  right: 0;
+  align-items: flex-end;
+  text-align: right;
+}
+
 .gate-panel {
-  --gate-ink: #c7c9ca;
-  position: relative;
+  /* Blocco fisso al centro viewport: il titolo non salta quando compare ACCESS */
+  position: absolute;
+  left: 50%;
+  top: 50%;
   z-index: 1;
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  gap: 1.15rem;
+  align-items: center;
   width: max-content;
-  max-width: min(96vw, 72rem);
-  margin: 0 auto;
+  max-width: min(92vw, 72rem);
+  padding: 0 clamp(0.5rem, 2vw, 1rem);
+  transform: translate(-50%, -50%);
 }
 
 .gate-title {
   margin: 0;
   width: max-content;
-  max-width: 96vw;
+  max-width: 92vw;
   font-family: var(--font-ui);
   font-weight: 400;
-  font-size: clamp(1.8rem, 5.8vw, 4.4rem);
+  font-size: clamp(1.55rem, 5.4vw, 4.2rem);
   letter-spacing: 0.06em;
   line-height: 1.1;
   white-space: nowrap;
   text-align: center;
   color: var(--gate-ink);
-  opacity: 1;
+  opacity: 0;
   text-transform: uppercase;
   min-height: 1.15em;
+  transition: opacity 0.75s ease;
 }
 
-/* Niente caret: larghezza stabile (= stringa) e centraggio fisso */
+.gate-title.is-in {
+  opacity: 1;
+}
+
 .gate-title::after {
   content: none;
   display: none;
 }
 
-.gate-subrow {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: clamp(1.5rem, 6vw, 4rem);
-  width: 100%;
-}
-
 .gate-start {
+  /* Slot sotto il titolo: altezza sempre riservata, fuori dal flusso del centro */
+  position: absolute;
+  top: calc(100% + 1.15rem);
+  left: 50%;
   appearance: none;
   margin: 0;
   padding: 0;
@@ -171,58 +240,55 @@ body.is-entered .hud-root {
   background: transparent;
   color: var(--gate-ink);
   font-family: var(--font-ui);
-  font-size: clamp(1.05rem, 2.5vw, 1.35rem);
+  font-size: clamp(1.15rem, 2.6vw, 1.5rem);
   font-weight: 400;
   letter-spacing: 0.14em;
+  line-height: 1.2;
   text-transform: uppercase;
   white-space: nowrap;
-  text-align: left;
+  text-align: center;
   cursor: pointer;
+  min-height: 1.2em;
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transition: color 0.2s ease;
+  transform: translateX(-50%);
+  transition: opacity 0.7s ease, color 0.25s ease, visibility 0s linear 0.7s;
 }
 
 .gate-start.is-in {
-  opacity: 1;
   visibility: visible;
   pointer-events: auto;
+  opacity: 1;
+  color: var(--gate-ink);
+  transition: opacity 0.7s ease, color 0.25s ease, visibility 0s linear 0s;
+}
+
+.gate-start.is-pulse {
+  /* Parte dal colore a riposo → nessun salto brusco all’avvio */
+  animation: gate-cta-pulse 2.9s ease-in-out infinite;
 }
 
 .gate-start:hover {
-  color: #6e767e;
+  color: #f2f3f4;
+  animation: none;
+  opacity: 1;
 }
 
 .gate-start:active {
-  color: #50565c;
+  color: #8a9096;
 }
 
-.gate-meta {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0.12rem;
-  color: var(--gate-ink);
-  font-family: var(--font-ui);
-  font-size: clamp(1.05rem, 2.5vw, 1.35rem);
-  font-weight: 400;
-  letter-spacing: 0.14em;
-  line-height: 1.15;
-  text-transform: uppercase;
-  text-align: right;
-  white-space: nowrap;
-  opacity: 0;
-  visibility: hidden;
-}
-
-.gate-meta.is-in {
-  opacity: 1;
-  visibility: visible;
-}
-
-.gate-meta [data-gate-line] {
-  min-height: 1.15em;
+@keyframes gate-cta-pulse {
+  0%,
+  100% {
+    color: #c7c9ca;
+    opacity: 1;
+  }
+  50% {
+    color: #9aa0a4;
+    opacity: 0.88;
+  }
 }
 
 /* —— Medical HUD sidebar —— */
@@ -720,19 +786,23 @@ body.is-entered .hud-root {
   .gate-title {
     white-space: normal;
     text-wrap: balance;
-    width: min(96vw, max-content);
+    width: min(92vw, max-content);
   }
 
   .gate-panel {
-    width: min(96vw, max-content);
+    width: min(92vw, max-content);
+    gap: 1rem;
   }
 
-  .gate-subrow {
-    flex-wrap: wrap;
-    gap: 0.85rem 1.5rem;
+  .gate-corner {
+    max-width: min(48vw, 16rem);
+    padding: 0.55rem 0.65rem;
+    font-size: clamp(0.62rem, 2.6vw, 0.78rem);
+    letter-spacing: 0.08em;
+    white-space: normal;
   }
 
-  .gate-meta {
-    margin-left: auto;
+  .gate-corner [data-gate-line] {
+    white-space: nowrap;
   }
 }

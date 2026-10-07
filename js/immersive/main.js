@@ -232,43 +232,111 @@ function gateMorph(el, text, opts = {}) {
   });
 }
 
+function gateScrambleCount(text) {
+  return [...String(text ?? "")].filter((ch) => /[A-Za-z0-9]/.test(ch)).length;
+}
+
+/** Lock timing so lines of different length finish together. */
+function gateSyncMorphOpts(text, targetMs = 3200) {
+  const n = Math.max(1, gateScrambleCount(text));
+  const lock = Math.max(28, targetMs / n);
+  return {
+    slowLock: lock,
+    fastLock: lock * 0.82,
+    scrambleMs: 28,
+    startDelay: 0,
+    fastFrom: -1,
+  };
+}
+
 function formatGateDuration(sec) {
   const s = Math.max(0, Math.round(Number(sec) || 0));
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
   const r = s % 60;
-  return `${h}:${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
 }
 
 function formatGateDistance(km) {
   const n = Number(km);
-  if (!Number.isFinite(n)) return "3,31 KM";
-  return `${n.toFixed(2).replace(".", ",")} KM`;
+  if (!Number.isFinite(n)) return "3.31 KM";
+  return `${n.toFixed(2)} KM`;
 }
 
-function gateReportLines() {
+function formatGateScanDate(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "02 OCT 2026";
+  const months = [
+    "JAN",
+    "FEB",
+    "MAR",
+    "APR",
+    "MAY",
+    "JUN",
+    "JUL",
+    "AUG",
+    "SEP",
+    "OCT",
+    "NOV",
+    "DEC",
+  ];
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  const mon = months[d.getUTCMonth()] || "OCT";
+  const yyyy = d.getUTCFullYear();
+  return `${dd} ${mon} ${yyyy}`;
+}
+
+function gateBpmRange(stats, track) {
+  let min = Number(stats?.hr_min);
+  let max = Number(stats?.hr_max);
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    const bpms = (track || [])
+      .map((p) => Number(p?.bpm))
+      .filter((v) => Number.isFinite(v) && v > 0);
+    if (bpms.length) {
+      min = Math.min(...bpms);
+      max = Math.max(...bpms);
+    }
+  }
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    // Fallback: recap cardiaco Apple Health (campioni HR)
+    return { min: 87, max: 184 };
+  }
+  return { min: Math.round(min), max: Math.round(max) };
+}
+
+/** Sync corner meta da GPX (hike_viz) + recap cardiaco. */
+function applyGateHikeStats() {
   const stats = state.data?.stats || {};
+  const track = state.data?.track || [];
+
   const duration = Number.isFinite(Number(stats.duration_seconds))
     ? formatGateDuration(stats.duration_seconds)
-    : "2:32:59";
+    : "02:32:59";
   const distance = Number.isFinite(Number(stats.distance_km))
     ? formatGateDistance(stats.distance_km)
-    : "3,31 KM";
-  return [
-    "NAME: PEAK PROMPT",
-    "REPORT NUMBER: 01",
-    "TYPE: TREKKING",
-    `DURATION: ${duration}`,
-    `DISTANCE: ${distance}`,
-  ];
+    : "3.31 KM";
+  const { min: bpmMin, max: bpmMax } = gateBpmRange(stats, track);
+  const scanDate = stats.start
+    ? formatGateScanDate(stats.start)
+    : "02 OCT 2026";
+
+  const durEl = document.querySelector("[data-gate-duration]");
+  const distEl = document.querySelector("[data-gate-distance]");
+  const bpmEl = document.querySelector("[data-gate-bpm]");
+  const scanEl = document.querySelector("[data-gate-scan]");
+  if (durEl) durEl.dataset.final = `DURATION: ${duration}`;
+  if (distEl) distEl.dataset.final = `DISTANCE: ${distance}`;
+  if (bpmEl) bpmEl.dataset.final = `BPM RANGE: ${bpmMin} - ${bpmMax} BPM`;
+  if (scanEl) scanEl.dataset.final = `SCAN DATE: ${scanDate}`;
 }
 
-/** Splash: titolo → ACCESS → meta destra (morph in sequenza). */
+/** Splash: titolo → ACCESS → overlay DICOM 4 angoli (morph). */
 function bindStartGate() {
   const gate = document.getElementById("gate");
   const btn = document.getElementById("gate-start");
   const title = document.getElementById("gate-title");
-  const meta = document.getElementById("gate-meta");
+  const corners = gate ? [...gate.querySelectorAll(".gate-corner")] : [];
   if (!btn || !gate || gate.dataset.bound === "1") return;
   gate.dataset.bound = "1";
 
@@ -280,58 +348,61 @@ function bindStartGate() {
     (btn.getAttribute("aria-label") || btn.textContent || "").trim() ||
     "[ACCESS CARDIAC REPORT]";
 
-  // Riserva layout sottotitoli vuoti finché non tocca a loro
   btn.textContent = "";
   btn.style.minWidth = `${ctaText.length}ch`;
-  const metaLines = meta ? [...meta.querySelectorAll("[data-gate-line]")] : [];
+
+  const metaLines = corners.flatMap((corner) => [
+    ...corner.querySelectorAll("[data-gate-line]"),
+  ]);
   metaLines.forEach((line) => {
     line.dataset.final = (line.textContent || "").trim();
     line.textContent = "";
+    line.style.minWidth = `${(line.dataset.final || "").length}ch`;
   });
 
   const runSequence = async () => {
+    // 1) Titolo — fade-in, poi morph
     if (title) {
+      title.classList.add("is-in");
+      await new Promise((r) => setTimeout(r, 180));
       await gateMorph(title, fullText, {
-        slowLock: 58,
-        fastLock: 36,
-        scrambleMs: 14,
+        slowLock: 102,
+        fastLock: 66,
+        scrambleMs: 20,
         fastFrom: fullText.indexOf("ITS OWN"),
       });
     }
 
-    await new Promise((r) => setTimeout(r, 160));
-    btn.classList.add("is-in");
-    await gateMorph(btn, ctaText, {
-      slowLock: 56,
-      fastLock: 40,
-      scrambleMs: 14,
-      startDelay: 48,
-    });
-
+    // 2) Info DICOM — fade-in, poi morph sincronizzati (fine comune)
     await new Promise((r) => setTimeout(r, 280));
-    const lines = gateReportLines();
-    // Allinea nodi DOM alle righe (incluso NAME PEAK PROMPT)
-    if (meta && metaLines.length !== lines.length) {
-      meta.innerHTML = lines.map(() => `<div data-gate-line></div>`).join("");
-      metaLines.length = 0;
-      metaLines.push(...meta.querySelectorAll("[data-gate-line]"));
-    }
-    metaLines.forEach((line, i) => {
-      line.dataset.final = lines[i] || "";
-      line.textContent = "";
-      line.style.minWidth = `${(lines[i] || "").length}ch`;
+    applyGateHikeStats();
+    metaLines.forEach((line) => {
+      const finalText = line.dataset.final || "";
+      line.style.minWidth = `${finalText.length}ch`;
     });
-    meta?.classList.add("is-in");
+    corners.forEach((corner) => corner.classList.add("is-in"));
+    await new Promise((r) => setTimeout(r, 180));
+
+    const INFO_MORPH_MS = 3400;
     await Promise.all(
-      metaLines.map((line, i) =>
-        gateMorph(line, line.dataset.final || lines[i] || "", {
-          slowLock: 95,
-          fastLock: 68,
-          scrambleMs: 24,
-          startDelay: 90 + i * 110,
-        })
-      )
+      metaLines.map((line) => {
+        const text = line.dataset.final || "";
+        return gateMorph(line, text, gateSyncMorphOpts(text, INFO_MORPH_MS));
+      })
     );
+
+    // 3) ACCESS — fade-in + morph, poi 1s e pulse soft
+    await new Promise((r) => setTimeout(r, 260));
+    btn.classList.add("is-in");
+    await new Promise((r) => setTimeout(r, 120));
+    await gateMorph(btn, ctaText, {
+      slowLock: 98,
+      fastLock: 70,
+      scrambleMs: 20,
+      startDelay: 40,
+    });
+    await new Promise((r) => setTimeout(r, 1000));
+    btn.classList.add("is-pulse");
   };
 
   runSequence();
