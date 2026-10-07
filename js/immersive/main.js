@@ -161,8 +161,9 @@ async function boot() {
           return;
         }
         captionEl.innerHTML = lines
-          .map(() => `<div class="text-morph"></div>`)
+          .map(() => `<div class="text-morph crt-text"></div>`)
           .join("");
+        captionEl.classList.add("crt-text", "crt-text--soft");
         captionEl.classList.add("is-on");
         captionEl.setAttribute("aria-hidden", "false");
         [...captionEl.children].forEach((node, i) => {
@@ -401,7 +402,7 @@ function bindStartGate() {
       scrambleMs: 20,
       startDelay: 40,
     });
-    await new Promise((r) => setTimeout(r, 1000));
+    await new Promise((r) => setTimeout(r, 160));
     btn.classList.add("is-pulse");
   };
 

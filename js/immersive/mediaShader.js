@@ -23,6 +23,7 @@ export const mediaFragmentShader = /* glsl */ `
   uniform float uTime;
   uniform float uGrain;
   uniform float uEdge;
+  uniform float uEdgeSoft;
 
   varying vec2 vUv;
 
@@ -77,7 +78,13 @@ export const mediaFragmentShader = /* glsl */ `
     graded += g * uGrain;
     graded = clamp(graded, 0.0, 1.0);
 
-    gl_FragColor = vec4(graded, tex.a * uOpacity);
+    // Soft CRT edge: thin undefined band only near the border
+    float ax = min(vUv.x, 1.0 - vUv.x);
+    float ay = min(vUv.y, 1.0 - vUv.y);
+    float edgeDist = min(ax, ay);
+    float edgeMask = smoothstep(0.0, max(0.001, uEdgeSoft), edgeDist);
+
+    gl_FragColor = vec4(graded, tex.a * uOpacity * edgeMask);
   }
 `;
 
@@ -92,11 +99,13 @@ export function createMediaMaterial(texture, { saturation = 0.35, contrast = 1.5
       uTime: { value: 0 },
       uGrain: { value: 0.14 },
       uEdge: { value: 1.15 },
+      // ~1.5% UV ≈ sottile alone come i 7px del menu
+      uEdgeSoft: { value: 0.015 },
     },
     vertexShader: mediaVertexShader,
     fragmentShader: mediaFragmentShader,
     side: THREE.DoubleSide,
-    transparent: false,
+    transparent: true,
     depthWrite: true,
     depthTest: true,
     blending: THREE.NormalBlending,
@@ -119,15 +128,19 @@ export function setShaderOpacity(material, opacity) {
   const o = Math.min(1, Math.max(0, Number(opacity) ?? 1));
   material.uniforms.uOpacity.value = o;
   const fade = o < 0.999;
-  material.transparent = fade;
-  material.depthWrite = !fade || o > 0.85;
+  const softEdge = (material.uniforms.uEdgeSoft?.value || 0) > 0.0001;
+  // Soft CRT border needs alpha even at full opacity
+  material.transparent = fade || softEdge;
+  material.depthWrite = (!fade || o > 0.85) && o > 0.05;
 }
 
 export function tickMediaShaderTime(material, time) {
   if (material?.uniforms?.uTime) material.uniforms.uTime.value = time;
 }
 
-/** Compat */
-export function setShaderEdgeSoft(material) {
-  if (material) material.depthWrite = true;
+/** Soft CRT border width in UV (thin band near edges). */
+export function setShaderEdgeSoft(material, width = 0.015) {
+  if (!material?.uniforms?.uEdgeSoft) return;
+  material.uniforms.uEdgeSoft.value = Math.max(0, Number(width) || 0);
+  material.transparent = true;
 }

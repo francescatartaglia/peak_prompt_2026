@@ -41,8 +41,9 @@ function setOpacity(mesh, opacity) {
   if (mat.uniforms?.uOpacity) {
     mat.uniforms.uOpacity.value = o;
     const fade = o < 0.999;
-    mat.transparent = fade;
-    mat.depthWrite = !fade || o > 0.85;
+    const softEdge = (mat.uniforms.uEdgeSoft?.value || 0) > 0.0001;
+    mat.transparent = fade || softEdge;
+    mat.depthWrite = (!fade || o > 0.85) && o > 0.05;
     return;
   }
   mat.transparent = o < 0.999;

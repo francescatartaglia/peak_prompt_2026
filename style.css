@@ -5,6 +5,26 @@
   --hud-dim: #8a8a8a;
   --hud-bg: #000000;
   --font-ui: "VT323", "Courier New", monospace;
+  /* Soft CRT / old-monitor phosphor */
+  --crt-shadow:
+    -0.65px 0 rgba(255, 72, 48, 0.32),
+    0.65px 0 rgba(70, 190, 255, 0.26),
+    0 0 0.9px rgba(220, 224, 228, 0.75),
+    0 0 2.4px rgba(190, 195, 200, 0.4),
+    0 0 5px rgba(160, 165, 170, 0.18);
+  --crt-filter: blur(0.38px) contrast(1.06) brightness(1.03);
+  --crt-scene-filter: blur(0.34px) contrast(1.05) saturate(0.97) brightness(1.02);
+}
+
+/* Shared CRT soft type (captions, HUD labels, etc.) */
+.crt-text {
+  text-shadow: var(--crt-shadow);
+  -webkit-font-smoothing: none;
+  text-rendering: optimizeSpeed;
+}
+
+.crt-text--soft {
+  filter: var(--crt-filter);
 }
 
 *,
@@ -51,6 +71,11 @@ body.is-entered .hud-root {
   opacity: 1;
 }
 
+/* Soft edges on scene media (old CRT glass) */
+body.is-entered #c {
+  filter: var(--crt-scene-filter);
+}
+
 .boot {
   position: fixed;
   inset: 0;
@@ -73,8 +98,10 @@ body.is-entered .hud-root {
 
 /* Splash: DICOM / Cardiac CT header overlay */
 .gate {
-  --gate-ink: #c7c9ca;
+  --gate-ink: #d0d2d4;
   --gate-ink-dim: #9aa0a4;
+  --gate-crt-shadow: var(--crt-shadow);
+  --gate-crt-filter: var(--crt-filter);
   position: fixed;
   inset: 0;
   z-index: 21;
@@ -97,7 +124,7 @@ body.is-entered .hud-root {
   position: absolute;
   inset: -8%;
   pointer-events: none;
-  opacity: 0.16;
+  opacity: 0.22;
   mix-blend-mode: screen;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0.7 0 0 0 0 0.72 0 0 0 0 0.74 0 0 0 0.55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   background-size: 160px 160px;
@@ -143,6 +170,10 @@ body.is-entered .hud-root {
   opacity: 0;
   visibility: hidden;
   transition: opacity 0.75s ease, visibility 0s linear 0.75s;
+  text-shadow: var(--gate-crt-shadow);
+  filter: var(--gate-crt-filter);
+  -webkit-font-smoothing: none;
+  text-rendering: optimizeSpeed;
 }
 
 .gate-corner.is-in {
@@ -216,6 +247,10 @@ body.is-entered .hud-root {
   text-transform: uppercase;
   min-height: 1.15em;
   transition: opacity 0.75s ease;
+  text-shadow: var(--gate-crt-shadow);
+  filter: var(--gate-crt-filter);
+  -webkit-font-smoothing: none;
+  text-rendering: optimizeSpeed;
 }
 
 .gate-title.is-in {
@@ -254,40 +289,59 @@ body.is-entered .hud-root {
   pointer-events: none;
   transform: translateX(-50%);
   transition: opacity 0.7s ease, color 0.25s ease, visibility 0s linear 0.7s;
+  text-shadow: var(--gate-crt-shadow);
+  filter: var(--gate-crt-filter);
+  -webkit-font-smoothing: none;
+  text-rendering: optimizeSpeed;
 }
 
 .gate-start.is-in {
   visibility: visible;
   pointer-events: auto;
   opacity: 1;
-  color: var(--gate-ink);
+  color: #e11d2e;
+  text-shadow:
+    -0.7px 0 rgba(255, 60, 40, 0.4),
+    0.7px 0 rgba(255, 140, 110, 0.22),
+    0 0 1.2px rgba(225, 29, 46, 0.7),
+    0 0 3.5px rgba(180, 20, 35, 0.45),
+    0 0 7px rgba(100, 10, 18, 0.28);
   transition: opacity 0.7s ease, color 0.25s ease, visibility 0s linear 0s;
 }
 
 .gate-start.is-pulse {
-  /* Parte dal colore a riposo → nessun salto brusco all’avvio */
-  animation: gate-cta-pulse 2.9s ease-in-out infinite;
+  animation: gate-cta-pulse 2.8s ease-in-out infinite;
 }
 
 .gate-start:hover {
-  color: #f2f3f4;
+  color: #ff4d5a;
   animation: none;
   opacity: 1;
 }
 
 .gate-start:active {
-  color: #8a9096;
+  color: #8a121c;
 }
 
 @keyframes gate-cta-pulse {
   0%,
   100% {
-    color: #c7c9ca;
-    opacity: 1;
+    color: #e11d2e;
+    text-shadow:
+      -0.7px 0 rgba(255, 60, 40, 0.4),
+      0.7px 0 rgba(255, 140, 110, 0.22),
+      0 0 1.2px rgba(225, 29, 46, 0.7),
+      0 0 3.5px rgba(180, 20, 35, 0.45),
+      0 0 7px rgba(100, 10, 18, 0.28);
   }
   50% {
-    color: #9aa0a4;
-    opacity: 0.88;
+    color: #8f141e;
+    text-shadow:
+      -0.6px 0 rgba(190, 40, 35, 0.34),
+      0.6px 0 rgba(140, 35, 40, 0.2),
+      0 0 1.1px rgba(143, 20, 30, 0.62),
+      0 0 3.2px rgba(110, 14, 22, 0.4),
+      0 0 6px rgba(80, 10, 16, 0.24);
   }
 }
 
@@ -311,16 +365,35 @@ body.is-entered .hud-root {
   display: flex;
   flex-direction: column;
   gap: 0.7rem;
-  padding: 0.7rem 0.6rem 0.7rem;
+  padding: 0.7rem 0.75rem 0.7rem 0.6rem;
   background: #000000;
   border: 0;
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  border-right: 0;
   border-radius: 0;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
+  /* Soft edge only in a thin band at the right border */
   box-shadow: none;
+  -webkit-mask-image: linear-gradient(
+    to right,
+    #000 0%,
+    #000 calc(100% - 7px),
+    rgba(0, 0, 0, 0.55) calc(100% - 3px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    #000 0%,
+    #000 calc(100% - 7px),
+    rgba(0, 0, 0, 0.55) calc(100% - 3px),
+    transparent 100%
+  );
   font-family: var(--font-ui);
   color: var(--hud-fg);
+  text-shadow: var(--crt-shadow);
+  filter: var(--crt-filter);
+  -webkit-font-smoothing: none;
+  text-rendering: optimizeSpeed;
 }
 
 .hud-head {
@@ -359,9 +432,13 @@ body.is-entered .hud-root {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.04);
   background: #000000;
   padding: 0.3rem;
+  box-shadow:
+    inset 0 0 10px rgba(0, 0, 0, 0.55),
+    inset 0 0 1px rgba(200, 210, 220, 0.08),
+    0 0 8px rgba(160, 170, 180, 0.05);
 }
 
 .hud-track-label {
@@ -583,7 +660,8 @@ body.is-entered .hud-root {
 .hud-autoplay {
   margin-top: 0.15rem;
   padding-top: 0.45rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 1px 0 rgba(200, 210, 220, 0.04);
 }
 
 .hud-autoplay-btn {
@@ -601,17 +679,34 @@ body.is-entered .hud-root {
   font-size: 0.88rem;
   letter-spacing: 0.1em;
   cursor: pointer;
+  text-shadow: var(--crt-shadow);
+  -webkit-font-smoothing: none;
+  text-rendering: optimizeSpeed;
 }
 
 .hud-autoplay-label {
   flex: 1 1 auto;
   text-align: left;
+  text-shadow: var(--crt-shadow);
+  -webkit-font-smoothing: none;
+  text-rendering: optimizeSpeed;
 }
 
 .hud-autoplay-state {
+  display: inline-block;
   color: var(--hud-fg);
   min-width: 1.6em;
   text-align: right;
+  /* CRT soft dedicato su ON / OFF */
+  text-shadow:
+    -0.75px 0 rgba(255, 72, 48, 0.42),
+    0.75px 0 rgba(70, 190, 255, 0.34),
+    0 0 1px rgba(235, 238, 242, 0.9),
+    0 0 2.8px rgba(200, 205, 210, 0.55),
+    0 0 5.5px rgba(170, 175, 180, 0.25);
+  filter: blur(0.34px) contrast(1.07) brightness(1.04);
+  -webkit-font-smoothing: none;
+  text-rendering: optimizeSpeed;
 }
 
 .hud-switch {
@@ -620,9 +715,13 @@ body.is-entered .hud-root {
   width: 28px;
   height: 14px;
   border-radius: 999px;
-  border: 1px solid #666;
+  border: 1px solid rgba(180, 190, 200, 0.28);
   background: #1a1a1a;
-  transition: background 0.2s ease, border-color 0.2s ease;
+  box-shadow:
+    0 0 2.5px rgba(200, 210, 220, 0.18),
+    0 0 5px rgba(160, 170, 180, 0.08),
+    inset 0 0 4px rgba(0, 0, 0, 0.5);
+  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .hud-switch-thumb {
@@ -633,8 +732,12 @@ body.is-entered .hud-root {
   height: 10px;
   border-radius: 50%;
   background: #bdbdbd;
+  box-shadow:
+    -0.4px 0 rgba(255, 72, 48, 0.25),
+    0.4px 0 rgba(70, 190, 255, 0.2),
+    0 0 2.5px rgba(220, 224, 228, 0.4);
   transform: translateY(-50%);
-  transition: left 0.2s ease, background 0.2s ease;
+  transition: left 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
 }
 
 .hud-autoplay-btn.is-on {
@@ -643,12 +746,20 @@ body.is-entered .hud-root {
 
 .hud-autoplay-btn.is-on .hud-switch {
   background: color-mix(in srgb, var(--hud-accent) 35%, #111);
-  border-color: var(--hud-accent);
+  border-color: color-mix(in srgb, var(--hud-accent) 70%, transparent);
+  box-shadow:
+    0 0 3px color-mix(in srgb, var(--hud-accent) 35%, transparent),
+    0 0 6px color-mix(in srgb, var(--hud-accent) 18%, transparent),
+    inset 0 0 4px rgba(0, 0, 0, 0.4);
 }
 
 .hud-autoplay-btn.is-on .hud-switch-thumb {
   left: 14px;
   background: var(--hud-accent);
+  box-shadow:
+    -0.4px 0 rgba(255, 72, 48, 0.3),
+    0.4px 0 rgba(70, 190, 255, 0.28),
+    0 0 3px color-mix(in srgb, var(--hud-accent) 55%, transparent);
 }
 
 /* Autoplay: non interagibile, ma slider zona sempre acceso come in navigazione */
@@ -697,7 +808,8 @@ body.is-entered .hud-root {
   font-size: 0.72rem;
   letter-spacing: 0.06em;
   color: var(--hud-dim);
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 1px 0 rgba(200, 210, 220, 0.04);
   padding-top: 0.35rem;
 }
 
@@ -716,7 +828,10 @@ body.is-entered .hud-root {
   line-height: 1.35;
   letter-spacing: 0.04em;
   color: #ffffff;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+  text-shadow: var(--crt-shadow);
+  filter: var(--crt-filter);
+  -webkit-font-smoothing: none;
+  text-rendering: optimizeSpeed;
   white-space: nowrap;
   text-align: left;
   max-width: min(40vw, 22rem);
@@ -725,6 +840,13 @@ body.is-entered .hud-root {
 .autoplay-caption.is-on {
   opacity: 1;
   visibility: visible;
+}
+
+.autoplay-caption .text-morph,
+.autoplay-caption > div {
+  text-shadow: var(--crt-shadow);
+  -webkit-font-smoothing: none;
+  text-rendering: optimizeSpeed;
 }
 
 .hud-ww {
@@ -752,7 +874,10 @@ body.is-entered .hud-root {
   line-height: 1.35;
   letter-spacing: 0.04em;
   color: #ffffff;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+  text-shadow: var(--crt-shadow);
+  filter: var(--crt-filter);
+  -webkit-font-smoothing: none;
+  text-rendering: optimizeSpeed;
   white-space: nowrap;
   user-select: none;
 }
@@ -760,6 +885,9 @@ body.is-entered .hud-root {
 .media-hover [data-line] {
   display: block;
   min-height: 1.15em;
+  text-shadow: var(--crt-shadow);
+  -webkit-font-smoothing: none;
+  text-rendering: optimizeSpeed;
 }
 
 .media-hover.is-on {

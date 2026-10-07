@@ -55,13 +55,13 @@ export function mediaHoverLines(asset) {
  */
 export function createMediaHover(root, { camera, domElement, getMeshes, isEnabled } = {}) {
   const el = document.createElement("div");
-  el.className = "media-hover";
+  el.className = "media-hover crt-text crt-text--soft";
   el.setAttribute("aria-hidden", "true");
   el.innerHTML = `
-    <div data-line="name"></div>
-    <div data-line="format"></div>
-    <div data-line="size"></div>
-    <div data-line="time"></div>
+    <div data-line="name" class="crt-text"></div>
+    <div data-line="format" class="crt-text"></div>
+    <div data-line="size" class="crt-text"></div>
+    <div data-line="time" class="crt-text"></div>
   `;
   root.appendChild(el);
 
