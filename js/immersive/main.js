@@ -19,6 +19,8 @@ import { createHudSidebar } from "./hudSidebar.js";
 import { createMediaHover } from "./mediaHover.js";
 import { morphTextInPlace } from "./textMorph.js";
 import { createAutoplayController, buildChronoPlaylist } from "./autoplay.js";
+import { createCrtCursor } from "./crtCursor.js";
+import { createFocusController } from "./focus.js";
 
 const state = {
   data: null,
@@ -29,6 +31,8 @@ const state = {
   sphere: null,
   hud: null,
   mediaHover: null,
+  mediaFocus: null,
+  cursor: null,
   autoplay: null,
   ambient: createZoneAmbient(),
   fluid: null,
@@ -44,6 +48,8 @@ const state = {
   started: false,
   /** Slideshow autoplay attivo */
   autoplayOn: false,
+  /** Media inspection / focus mode */
+  isInspectingMedia: false,
   /** Risolto quando sfera + scena sono pronti */
   ready: null,
 };
@@ -59,6 +65,12 @@ async function boot() {
   let resolveReady;
   state.ready = new Promise((r) => {
     resolveReady = r;
+  });
+  state.cursor = createCrtCursor({
+    getCamera: () => state.camera,
+    getMeshes: () => state.sphere?.activeMeshes || [],
+    isMediaHotEnabled: () =>
+      state.started && state.navReady && !state.autoplayOn && !state.isInspectingMedia,
   });
   bindStartGate();
 
@@ -144,19 +156,68 @@ async function boot() {
         camera: state.camera,
         domElement: canvas,
         getMeshes: () => state.sphere?.activeMeshes || [],
-        isEnabled: () => state.started && state.navReady && !state.autoplayOn,
+        isEnabled: () =>
+          state.started &&
+          state.navReady &&
+          !state.autoplayOn &&
+          !state.isInspectingMedia,
       });
     }
 
     const captionEl = document.getElementById("autoplay-caption");
     const placeCaption = () => {
       if (!captionEl?.classList.contains("is-on")) return;
-      const layout = state.autoplay?.layoutCaption?.();
+      const layout = state.isInspectingMedia
+        ? state.mediaFocus?.layoutCaption?.()
+        : state.autoplay?.layoutCaption?.();
       if (!layout) return;
       captionEl.style.transform = "none";
       captionEl.style.left = `${Math.round(layout.left)}px`;
       captionEl.style.top = `${Math.round(layout.top)}px`;
     };
+
+    state.mediaFocus = createFocusController({
+      camera: state.camera,
+      controls: state.controls,
+      scene: state.scene,
+      getMeshes: () => state.sphere?.activeMeshes || [],
+      getSphereRadius: () => state.sphere?.radius || SPHERE_RADIUS,
+      getSphereGroup: () => state.sphere?.group || null,
+      isEnabled: () =>
+        state.started && state.navReady && !state.autoplayOn && !state.mediaFocus?.animating,
+      onInspectChange: (on) => {
+        state.isInspectingMedia = on;
+        if (on) {
+          state.mediaHover?.hide?.();
+          state.cursor?.reset?.();
+        }
+      },
+      onCaption: (lines) => {
+        if (!captionEl) return;
+        if (!lines) {
+          captionEl.classList.remove("is-on");
+          captionEl.innerHTML = "";
+          captionEl.setAttribute("aria-hidden", "true");
+          return;
+        }
+        captionEl.innerHTML = lines
+          .map(() => `<div class="text-morph crt-text"></div>`)
+          .join("");
+        captionEl.classList.add("crt-text", "crt-text--soft", "is-on");
+        captionEl.setAttribute("aria-hidden", "false");
+        [...captionEl.children].forEach((node, i) => {
+          morphTextInPlace(node, lines[i] ?? "", {
+            click: false,
+            slowLock: 42,
+            fastLock: 30,
+            scrambleMs: 18,
+            startDelay: 36 + i * 48,
+          });
+        });
+        placeCaption();
+      },
+    });
+    state.mediaFocus.bind(canvas);
 
     state.autoplay = createAutoplayController({
       camera: state.camera,
@@ -480,6 +541,8 @@ function bindStartGate() {
     gate.setAttribute("aria-hidden", "true");
     document.body.classList.add("is-entered");
     btn.classList.remove("is-loading");
+    // Leave ACCESS diamond → square for exploration
+    state.cursor?.reset?.();
 
     await ensureHeartbeat();
     resumeActiveVideos(state.sphere);
@@ -708,6 +771,7 @@ function applyZoneForAutoplay(zoneId) {
 function transitionToZone(zoneId) {
   if (state.autoplayOn) return;
   if (zoneId === state.zone) return;
+  if (state.isInspectingMedia) void state.mediaFocus?.unfocus();
 
   const to = zoneConfig(zoneId);
   const zone = state.data.zones[zoneId];
@@ -755,6 +819,10 @@ async function setAutoplay(on) {
       void waitNav();
     }
     return;
+  }
+
+  if (on && state.isInspectingMedia) {
+    await state.mediaFocus?.unfocus();
   }
 
   if (on === state.autoplayOn) return;
@@ -816,21 +884,22 @@ function animate() {
   const delta = state.clock.getDelta();
   const elapsed = state.clock.elapsedTime;
   const transport = state.audio.getSyncTime(elapsed);
+  const inspecting = state.isInspectingMedia;
 
-  if (state.sphere?.group && !state.autoplayOn) {
+  if (state.sphere?.group && !state.autoplayOn && !inspecting) {
     state.sphere.group.rotation.y += delta * sphereSpinRate;
   }
-  applyHeartbeat(state.sphere, transport, state.avgBpm);
+  applyHeartbeat(state.sphere, transport, state.avgBpm, { frozen: inspecting });
   if (state.started) keepVideosPlaying(state.sphere);
 
-  if (state.navReady && state.controls?.enabled && !state.autoplayOn) {
+  if (state.navReady && state.controls?.enabled && !state.autoplayOn && !inspecting) {
     state.controls.update();
   } else if (!state.navReady && state.controls && !state.introTween) {
     state.camera.lookAt(state.controls.target);
   }
 
-  if (!state.autoplayOn) state.mediaHover?.tick?.();
-  else state.placeCaption?.();
+  if (!state.autoplayOn && !inspecting) state.mediaHover?.tick?.();
+  else if (state.autoplayOn || inspecting) state.placeCaption?.();
 
   state.renderer.render(state.scene, state.camera);
 }

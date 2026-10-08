@@ -14,7 +14,8 @@
     0 0 5px rgba(160, 165, 170, 0.18);
   --crt-filter: blur(0.38px) contrast(1.06) brightness(1.03);
   --crt-widget-filter: blur(0.28px) contrast(1.04) brightness(1.02);
-  --crt-scene-filter: blur(0.34px) contrast(1.05) saturate(0.97) brightness(1.02);
+  /* No blur on WebGL canvas — blur pulled bg color into media edges as a tinted rim */
+  --crt-scene-filter: contrast(1.04) saturate(0.97) brightness(1.02);
   --crt-widget-glow:
     -0.45px 0 rgba(255, 72, 48, 0.2),
     0.45px 0 rgba(70, 190, 255, 0.16),
@@ -30,6 +31,57 @@
 
 .crt-text--soft {
   filter: var(--crt-filter);
+}
+
+/* Custom CRT cursor — white pixel square / diamond on hot targets */
+html.has-crt-cursor,
+html.has-crt-cursor * {
+  cursor: none !important;
+}
+
+.crt-cursor {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 99999;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s steps(2);
+  will-change: transform;
+}
+
+.crt-cursor.is-on {
+  opacity: 1;
+}
+
+.crt-cursor__sq {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  pointer-events: none;
+  user-select: none;
+  /* Soft CRT phosphor like the title */
+  filter:
+    blur(0.28px)
+    contrast(1.06)
+    brightness(1.04)
+    drop-shadow(-0.65px 0 rgba(255, 72, 48, 0.35))
+    drop-shadow(0.65px 0 rgba(70, 190, 255, 0.28))
+    drop-shadow(0 0 1px rgba(220, 224, 228, 0.55));
+  transform: rotate(0deg) scale(1);
+  transition: transform 0.22s ease;
+}
+
+.crt-cursor.is-hot .crt-cursor__sq {
+  transform: rotate(45deg) scale(1.18);
 }
 
 *,
@@ -169,7 +221,8 @@ body.is-entered #c {
   letter-spacing: 0.12em;
   line-height: 1.2;
   text-transform: uppercase;
-  color: var(--gate-ink);
+  /* Same secondary gray as HUD meta / foot */
+  color: var(--hud-dim);
   white-space: nowrap;
   pointer-events: none;
   opacity: 0;
@@ -320,7 +373,8 @@ body.is-entered #c {
 }
 
 .gate-start:hover {
-  color: #ff4d5a;
+  /* Slightly brighter than pulse peak (#e11d2e), not neon */
+  color: #f03a48;
   animation: none;
   opacity: 1;
 }

@@ -1,6 +1,6 @@
 /**
- * Radiography / cardiac CT media treatment:
- * high-contrast diagnostic look, edge boost, film grain, thermal-CT luminance map.
+ * Thermal-camera media treatment in black & white:
+ * high-contrast luminance map, edge boost, film grain.
  */
 
 import * as THREE from "three";
@@ -23,7 +23,6 @@ export const mediaFragmentShader = /* glsl */ `
   uniform float uTime;
   uniform float uGrain;
   uniform float uEdge;
-  uniform float uEdgeSoft;
 
   varying vec2 vUv;
 
@@ -37,20 +36,29 @@ export const mediaFragmentShader = /* glsl */ `
     return (n + n2) * 0.5;
   }
 
-  vec3 thermalCT(float lum) {
-    // Cold tissue → bone/hot chambers (DICOM + thermal hybrid)
-    vec3 c0 = vec3(0.02, 0.04, 0.08);
-    vec3 c1 = vec3(0.12, 0.22, 0.32);
-    vec3 c2 = vec3(0.45, 0.55, 0.52);
-    vec3 c3 = vec3(0.85, 0.78, 0.42);
-    vec3 c4 = vec3(0.98, 0.96, 0.94);
+  float thermalCurve(float lum) {
+    // Thermal luminance remap: cold dark → hot bright
     float x = clamp(lum, 0.0, 1.0);
-    vec3 col;
-    if (x < 0.28) col = mix(c0, c1, x / 0.28);
-    else if (x < 0.55) col = mix(c1, c2, (x - 0.28) / 0.27);
-    else if (x < 0.78) col = mix(c2, c3, (x - 0.55) / 0.23);
-    else col = mix(c3, c4, (x - 0.78) / 0.22);
-    return col;
+    float t;
+    if (x < 0.28) t = mix(0.02, 0.16, x / 0.28);
+    else if (x < 0.55) t = mix(0.16, 0.46, (x - 0.28) / 0.27);
+    else if (x < 0.78) t = mix(0.46, 0.78, (x - 0.55) / 0.23);
+    else t = mix(0.78, 0.98, (x - 0.78) / 0.22);
+    return t;
+  }
+
+  vec3 thermalSoft(float lum) {
+    // Soft thermal tint (cool → warm), not full palette
+    float x = clamp(lum, 0.0, 1.0);
+    vec3 c0 = vec3(0.06, 0.08, 0.12);
+    vec3 c1 = vec3(0.22, 0.26, 0.30);
+    vec3 c2 = vec3(0.52, 0.50, 0.46);
+    vec3 c3 = vec3(0.82, 0.78, 0.70);
+    vec3 c4 = vec3(0.96, 0.94, 0.90);
+    if (x < 0.28) return mix(c0, c1, x / 0.28);
+    if (x < 0.55) return mix(c1, c2, (x - 0.28) / 0.27);
+    if (x < 0.78) return mix(c2, c3, (x - 0.55) / 0.23);
+    return mix(c3, c4, (x - 0.78) / 0.22);
   }
 
   void main() {
@@ -58,33 +66,27 @@ export const mediaFragmentShader = /* glsl */ `
     vec3 rgb = tex.rgb * uBrightness;
 
     float lum = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
-    // Keep a whisper of chroma then crush toward diagnostic mono
     float chromaLum = mix(lum, dot(rgb, vec3(0.333)), 0.35);
     chromaLum = (chromaLum - 0.5) * uContrast + 0.5;
     chromaLum = clamp(chromaLum, 0.0, 1.0);
-    chromaLum = pow(chromaLum, 0.92);
+    chromaLum = pow(chromaLum, 0.9);
 
-    // Edge definition (radiography sharpness)
     float gx = dFdx(chromaLum);
     float gy = dFdy(chromaLum);
     float edge = clamp(length(vec2(gx, gy)) * uEdge * 14.0, 0.0, 1.0);
     float sharp = clamp(chromaLum + edge * 0.55 - edge * edge * 0.2, 0.0, 1.0);
 
-    vec3 graded = thermalCT(sharp);
-    // Slight desat control from zone grade
-    graded = mix(vec3(sharp), graded, clamp(0.65 + uSaturation * 0.35, 0.0, 1.0));
+    float mono = thermalCurve(sharp);
+    vec3 tinted = thermalSoft(sharp);
+    // Mostly desaturated thermal, keep a whisper of tint + original chroma
+    vec3 graded = mix(vec3(mono), tinted, 0.42);
+    graded = mix(graded, rgb * mono / max(lum, 0.08), 0.18 * clamp(uSaturation, 0.0, 1.0));
 
     float g = grain(vUv, uTime) * 2.0 - 1.0;
     graded += g * uGrain;
     graded = clamp(graded, 0.0, 1.0);
 
-    // Soft CRT edge: thin undefined band only near the border
-    float ax = min(vUv.x, 1.0 - vUv.x);
-    float ay = min(vUv.y, 1.0 - vUv.y);
-    float edgeDist = min(ax, ay);
-    float edgeMask = smoothstep(0.0, max(0.001, uEdgeSoft), edgeDist);
-
-    gl_FragColor = vec4(graded, tex.a * uOpacity * edgeMask);
+    gl_FragColor = vec4(graded, tex.a * uOpacity);
   }
 `;
 
@@ -97,15 +99,13 @@ export function createMediaMaterial(texture, { saturation = 0.35, contrast = 1.5
       uBrightness: { value: brightness },
       uOpacity: { value: 1 },
       uTime: { value: 0 },
-      uGrain: { value: 0.14 },
+      uGrain: { value: 0.22 },
       uEdge: { value: 1.15 },
-      // ~1.5% UV ≈ sottile alone come i 7px del menu
-      uEdgeSoft: { value: 0.015 },
     },
     vertexShader: mediaVertexShader,
     fragmentShader: mediaFragmentShader,
     side: THREE.DoubleSide,
-    transparent: true,
+    transparent: false,
     depthWrite: true,
     depthTest: true,
     blending: THREE.NormalBlending,
@@ -128,9 +128,7 @@ export function setShaderOpacity(material, opacity) {
   const o = Math.min(1, Math.max(0, Number(opacity) ?? 1));
   material.uniforms.uOpacity.value = o;
   const fade = o < 0.999;
-  const softEdge = (material.uniforms.uEdgeSoft?.value || 0) > 0.0001;
-  // Soft CRT border needs alpha even at full opacity
-  material.transparent = fade || softEdge;
+  material.transparent = fade;
   material.depthWrite = (!fade || o > 0.85) && o > 0.05;
 }
 
@@ -138,9 +136,5 @@ export function tickMediaShaderTime(material, time) {
   if (material?.uniforms?.uTime) material.uniforms.uTime.value = time;
 }
 
-/** Soft CRT border width in UV (thin band near edges). */
-export function setShaderEdgeSoft(material, width = 0.015) {
-  if (!material?.uniforms?.uEdgeSoft) return;
-  material.uniforms.uEdgeSoft.value = Math.max(0, Number(width) || 0);
-  material.transparent = true;
-}
+/** No-op: soft edge removed (caused tinted/black rims over fluid bg). */
+export function setShaderEdgeSoft() {}
