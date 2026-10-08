@@ -67,12 +67,34 @@ async function boot() {
     state.fluid = createFluidBackground(document.getElementById("bg"));
     setupThree(canvas);
 
+    const stats = state.data?.stats || {};
+    const { min: bpmMin, max: bpmMax } = gateBpmRange(stats, state.data?.track || []);
     state.hud = createHudSidebar(document.getElementById("hud-root"), {
       track: state.data.track || [],
       startZone: 1,
       soundVol: state.ambient.getVolume(),
       heartVol: state.audio.getVolume(),
       title: "PEAK PROMPT",
+      report: {
+        examId: "CT-2026-991",
+        series: "3D CARDIAC RECON",
+        patientId: "HK-8842",
+        patientName: "FRANCESCA TARTAGLIA",
+        scanDate: stats.start ? formatGateScanDate(stats.start) : "02 OCT 2026",
+        bpmMin,
+        bpmMax,
+        kv: 120,
+        ma: 400,
+        hikeType: "TREKKING",
+        location: formatGateLocation(state.data?.title || state.data?.location),
+        endBpm: gateEndBpm(stats, state.data?.track || []),
+        duration: Number.isFinite(Number(stats.duration_seconds))
+          ? formatGateDuration(stats.duration_seconds)
+          : "02:32:59",
+        distance: Number.isFinite(Number(stats.distance_km))
+          ? formatGateDistance(stats.distance_km)
+          : "3.31 KM",
+      },
       onZoneChange: (zone) => {
         if (state.autoplayOn) return;
         transitionToZone(zone);
@@ -264,6 +286,36 @@ function formatGateDistance(km) {
   return `${n.toFixed(2)} KM`;
 }
 
+/** Compact English LOCATION from hike title / explicit location. */
+function formatGateLocation(raw) {
+  const fallback = "FALZAREGO · LAGAZUOI";
+  const s = String(raw || "").trim();
+  if (!s) return fallback;
+  const parts = s
+    .split(/\s*[-–—]\s*/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (parts.length >= 2) {
+    const short = (name) =>
+      String(name)
+        .replace(/^(pian|rifugio|forcella)\s+/i, "")
+        .trim();
+    return `${short(parts[0])} · ${short(parts[parts.length - 1])}`.toUpperCase();
+  }
+  return s.toUpperCase();
+}
+
+/** BPM at hike end (last track sample). */
+function gateEndBpm(stats, track) {
+  for (let i = (track || []).length - 1; i >= 0; i -= 1) {
+    const bpm = Number(track[i]?.bpm);
+    if (Number.isFinite(bpm) && bpm > 0) return Math.round(bpm);
+  }
+  const avg = Number(stats?.hr_avg);
+  if (Number.isFinite(avg)) return Math.round(avg);
+  return 111;
+}
+
 function formatGateScanDate(iso) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "02 OCT 2026";
@@ -322,14 +374,20 @@ function applyGateHikeStats() {
     ? formatGateScanDate(stats.start)
     : "02 OCT 2026";
 
+  const location = formatGateLocation(state.data?.title || state.data?.location);
+  const endBpm = gateEndBpm(stats, track);
   const durEl = document.querySelector("[data-gate-duration]");
   const distEl = document.querySelector("[data-gate-distance]");
   const bpmEl = document.querySelector("[data-gate-bpm]");
+  const pulseEl = document.querySelector("[data-gate-pulse]");
   const scanEl = document.querySelector("[data-gate-scan]");
+  const locEl = document.querySelector("[data-gate-location]");
   if (durEl) durEl.dataset.final = `DURATION: ${duration}`;
   if (distEl) distEl.dataset.final = `DISTANCE: ${distance}`;
   if (bpmEl) bpmEl.dataset.final = `BPM RANGE: ${bpmMin} - ${bpmMax} BPM`;
+  if (pulseEl) pulseEl.dataset.final = `PEAK PULSE: ${endBpm} BPM`;
   if (scanEl) scanEl.dataset.final = `SCAN DATE: ${scanDate}`;
+  if (locEl) locEl.dataset.final = `LOCATION: ${location}`;
 }
 
 /** Splash: titolo → ACCESS → overlay DICOM 4 angoli (morph). */
@@ -367,22 +425,22 @@ function bindStartGate() {
       title.classList.add("is-in");
       await new Promise((r) => setTimeout(r, 180));
       await gateMorph(title, fullText, {
-        slowLock: 102,
-        fastLock: 66,
-        scrambleMs: 20,
+        slowLock: 160,
+        fastLock: 108,
+        scrambleMs: 26,
         fastFrom: fullText.indexOf("ITS OWN"),
       });
     }
 
     // 2) Info DICOM — fade-in, poi morph sincronizzati (fine comune)
-    await new Promise((r) => setTimeout(r, 280));
+    await new Promise((r) => setTimeout(r, 300));
     applyGateHikeStats();
     metaLines.forEach((line) => {
       const finalText = line.dataset.final || "";
       line.style.minWidth = `${finalText.length}ch`;
     });
     corners.forEach((corner) => corner.classList.add("is-in"));
-    await new Promise((r) => setTimeout(r, 180));
+    await new Promise((r) => setTimeout(r, 200));
 
     const INFO_MORPH_MS = 3400;
     await Promise.all(
@@ -392,15 +450,15 @@ function bindStartGate() {
       })
     );
 
-    // 3) ACCESS — fade-in + morph, poi 1s e pulse soft
-    await new Promise((r) => setTimeout(r, 260));
+    // 3) ACCESS — fade-in + morph, poi pulse soft
+    await new Promise((r) => setTimeout(r, 280));
     btn.classList.add("is-in");
-    await new Promise((r) => setTimeout(r, 120));
+    await new Promise((r) => setTimeout(r, 140));
     await gateMorph(btn, ctaText, {
-      slowLock: 98,
-      fastLock: 70,
-      scrambleMs: 20,
-      startDelay: 40,
+      slowLock: 152,
+      fastLock: 112,
+      scrambleMs: 26,
+      startDelay: 64,
     });
     await new Promise((r) => setTimeout(r, 160));
     btn.classList.add("is-pulse");

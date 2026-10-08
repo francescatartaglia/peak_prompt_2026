@@ -13,7 +13,12 @@
     0 0 2.4px rgba(190, 195, 200, 0.4),
     0 0 5px rgba(160, 165, 170, 0.18);
   --crt-filter: blur(0.38px) contrast(1.06) brightness(1.03);
+  --crt-widget-filter: blur(0.28px) contrast(1.04) brightness(1.02);
   --crt-scene-filter: blur(0.34px) contrast(1.05) saturate(0.97) brightness(1.02);
+  --crt-widget-glow:
+    -0.45px 0 rgba(255, 72, 48, 0.2),
+    0.45px 0 rgba(70, 190, 255, 0.16),
+    0 0 2px rgba(200, 210, 220, 0.18);
 }
 
 /* Shared CRT soft type (captions, HUD labels, etc.) */
@@ -217,7 +222,7 @@ body.is-entered #c {
 }
 
 .gate-panel {
-  /* Blocco fisso al centro viewport: il titolo non salta quando compare ACCESS */
+  /* Centro ottico titolo + ACCESS: slot CTA riservato da subito (no jump) */
   position: absolute;
   left: 50%;
   top: 50%;
@@ -228,6 +233,7 @@ body.is-entered #c {
   width: max-content;
   max-width: min(92vw, 72rem);
   padding: 0 clamp(0.5rem, 2vw, 1rem);
+  padding-bottom: calc(1.2rem + 1.45em);
   transform: translate(-50%, -50%);
 }
 
@@ -263,10 +269,10 @@ body.is-entered #c {
 }
 
 .gate-start {
-  /* Slot sotto il titolo: altezza sempre riservata, fuori dal flusso del centro */
+  /* Ancorato allo slot riservato sotto il titolo (gruppo centrato in verticale) */
   position: absolute;
-  top: calc(100% + 1.15rem);
   left: 50%;
+  bottom: 0;
   appearance: none;
   margin: 0;
   padding: 0;
@@ -362,34 +368,52 @@ body.is-entered #c {
   pointer-events: auto;
   width: min(18.5rem, 42vw);
   height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
-  gap: 0.7rem;
-  padding: 0.7rem 0.75rem 0.7rem 0.6rem;
+  gap: 1.05rem;
+  /* Flush solid black on top / left / bottom; soft fade only on the right */
+  padding: 0.85rem 0.75rem 0.85rem 0.75rem;
+  margin: 0;
   background: #000000;
   border: 0;
-  border-right: 0;
   border-radius: 0;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
-  /* Soft edge only in a thin band at the right border */
   box-shadow: none;
+  /* Soft right edge — short band, little spill past the border */
   -webkit-mask-image: linear-gradient(
     to right,
     #000 0%,
-    #000 calc(100% - 7px),
-    rgba(0, 0, 0, 0.55) calc(100% - 3px),
+    #000 calc(100% - 4px),
+    rgba(0, 0, 0, 0.4) calc(100% - 1.5px),
     transparent 100%
   );
   mask-image: linear-gradient(
     to right,
     #000 0%,
-    #000 calc(100% - 7px),
-    rgba(0, 0, 0, 0.55) calc(100% - 3px),
+    #000 calc(100% - 4px),
+    rgba(0, 0, 0, 0.4) calc(100% - 1.5px),
     transparent 100%
   );
   font-family: var(--font-ui);
   color: var(--hud-fg);
+  -webkit-font-smoothing: none;
+  text-rendering: optimizeSpeed;
+}
+
+/* CRT soft type on HUD copy (same as splash) */
+.hud-title,
+.hud-sub,
+.hud-meta,
+.hud-track-label,
+.hud-label,
+.hud-readout,
+.hud-foot,
+.hud-orient,
+.hud-autoplay-btn,
+.hud-autoplay-label,
+.hud-autoplay-state {
   text-shadow: var(--crt-shadow);
   filter: var(--crt-filter);
   -webkit-font-smoothing: none;
@@ -401,50 +425,52 @@ body.is-entered #c {
 }
 
 .hud-title {
-  font-size: 1.15rem;
+  font-size: 1.28rem;
   letter-spacing: 0.06em;
   line-height: 1.05;
   color: #f2f7fc;
 }
 
 .hud-sub {
-  margin-top: 0.1rem;
-  font-size: 0.8rem;
+  margin-top: 0.12rem;
+  font-size: 0.92rem;
   letter-spacing: 0.1em;
-  color: var(--hud-dim);
+  color: #f2f7fc;
 }
 
 .hud-meta {
-  margin-top: 0.3rem;
+  margin-top: 0.35rem;
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  font-size: 0.8rem;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 0.06rem;
+  font-size: 0.68rem;
   color: var(--hud-dim);
   letter-spacing: 0.05em;
+  text-transform: uppercase;
+  opacity: 0.88;
 }
 
 .hud-track-wrap {
   position: relative;
-  flex: 0 1 48%;
-  max-height: 48vh;
+  flex: 0 1 46%;
+  max-height: 46vh;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  border: 1px solid rgba(255, 255, 255, 0.04);
-  background: #000000;
-  padding: 0.3rem;
-  box-shadow:
-    inset 0 0 10px rgba(0, 0, 0, 0.55),
-    inset 0 0 1px rgba(200, 210, 220, 0.08),
-    0 0 8px rgba(160, 170, 180, 0.05);
+  gap: 0.32rem;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  box-shadow: none;
 }
 
 .hud-track-label {
-  font-size: 0.75rem;
+  /* Align with BPM / SOUND / HEARTBEAT / AUTOPLAY labels */
+  font-size: 0.95rem;
   letter-spacing: 0.1em;
-  color: var(--hud-dim);
+  color: #f2f7fc;
+  line-height: 1.2;
 }
 
 .hud-track {
@@ -454,6 +480,15 @@ body.is-entered #c {
   display: block;
   pointer-events: none;
   touch-action: none;
+  border: 1px solid rgba(210, 220, 230, 0.18);
+  background: #000000;
+  box-shadow:
+    inset 0 0 10px rgba(0, 0, 0, 0.55),
+    inset 0 0 1px rgba(200, 210, 220, 0.14),
+    0 0 0 1px rgba(180, 190, 200, 0.06),
+    0 0 10px rgba(160, 170, 180, 0.1),
+    var(--crt-widget-glow);
+  filter: var(--crt-widget-filter);
 }
 
 .hud-track.is-scrubbable {
@@ -467,7 +502,8 @@ body.is-entered #c {
 
 .hud-orient {
   position: absolute;
-  inset: 1.6rem 0.55rem 0.55rem;
+  /* Sit over the canvas only (below ROUTE label) */
+  inset: 1.55rem 0.2rem 0.2rem;
   pointer-events: none;
   font-size: 1.05rem;
   color: rgba(200, 215, 230, 0.35);
@@ -505,14 +541,14 @@ body.is-entered #c {
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
-  gap: 0.95rem;
-  padding-top: 0.15rem;
+  gap: 1.2rem;
+  padding-top: 0.2rem;
 }
 
 .hud-control {
   display: flex;
   flex-direction: column;
-  gap: 0.28rem;
+  gap: 0.32rem;
 }
 
 .hud-control-row {
@@ -523,25 +559,35 @@ body.is-entered #c {
 }
 
 .hud-label {
-  font-size: 0.84rem;
+  font-size: 0.95rem;
   letter-spacing: 0.1em;
-  color: var(--hud-dim);
+  color: #f2f7fc;
 }
 
 .hud-readout {
-  font-size: 0.95rem;
+  font-size: 1.05rem;
   letter-spacing: 0.04em;
-  color: var(--hud-fg);
+  color: var(--hud-dim);
 }
 
 .hud-readout--zone {
-  color: var(--hud-fg);
+  color: var(--hud-dim);
 }
 
 .hud-zone-range {
-  font-size: 0.76rem;
+  font-size: 0.86rem;
   letter-spacing: 0.04em;
   color: var(--hud-accent);
+  /* Same CRT soft blur, but phosphor bleed in zone accent */
+  text-shadow:
+    -0.65px 0 color-mix(in srgb, var(--hud-accent) 55%, #ff6040),
+    0.65px 0 color-mix(in srgb, var(--hud-accent) 45%, #70d0ff),
+    0 0 0.9px color-mix(in srgb, var(--hud-accent) 85%, transparent),
+    0 0 2.4px color-mix(in srgb, var(--hud-accent) 50%, transparent),
+    0 0 5px color-mix(in srgb, var(--hud-accent) 28%, transparent);
+  filter: var(--crt-filter);
+  -webkit-font-smoothing: none;
+  text-rendering: optimizeSpeed;
 }
 
 .hud-zone-slider,
@@ -553,6 +599,7 @@ body.is-entered #c {
   cursor: pointer;
   touch-action: none;
   --pct: 50%;
+  filter: var(--crt-widget-filter);
 }
 
 .hud-zone-slider::before,
@@ -563,6 +610,7 @@ body.is-entered #c {
   right: 0;
   height: 2px;
   background: rgba(200, 215, 230, 0.16);
+  box-shadow: var(--crt-widget-glow);
 }
 
 .hud-h-fill {
@@ -572,11 +620,18 @@ body.is-entered #c {
   width: var(--pct, 50%);
   background: #c8c8c8;
   pointer-events: none;
+  box-shadow:
+    0 0 2px rgba(200, 210, 220, 0.28),
+    var(--crt-widget-glow);
 }
 
 .hud-h-fill--zone {
   background: var(--hud-accent);
   transition: background 0.35s ease, width 0.15s ease;
+  box-shadow:
+    0 0 2.5px color-mix(in srgb, var(--hud-accent) 45%, transparent),
+    -0.4px 0 color-mix(in srgb, var(--hud-accent) 35%, #ff6040),
+    0.4px 0 color-mix(in srgb, var(--hud-accent) 30%, #70d0ff);
 }
 
 .hud-zone-marks {
@@ -594,19 +649,24 @@ body.is-entered #c {
   appearance: none;
   border: 0;
   padding: 0;
-  width: 8px;
-  height: 8px;
-  border-radius: 1px;
+  width: 7px;
+  height: 7px;
+  border-radius: 0;
   background: #555555;
   opacity: 0.85;
   cursor: pointer;
+  box-shadow: var(--crt-widget-glow);
 }
 
 .hud-zone-mark.is-active {
   background: var(--z);
   opacity: 1;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--z) 40%, transparent);
-  transform: scale(1.25);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--z) 40%, transparent),
+    0 0 3px color-mix(in srgb, var(--z) 35%, transparent),
+    -0.4px 0 color-mix(in srgb, var(--z) 40%, #ff6040),
+    0.4px 0 color-mix(in srgb, var(--z) 35%, #70d0ff);
+  transform: scale(1.2);
 }
 
 .hud-zone-slider input[type="range"] {
@@ -622,35 +682,38 @@ body.is-entered #c {
 
 .hud-zone-slider input[type="range"]::-webkit-slider-thumb {
   appearance: none;
-  width: 11px;
-  height: 14px;
-  border-radius: 1px;
+  width: 8px;
+  height: 8px;
+  border-radius: 0;
   background: #e8e8e8;
   border: 1px solid var(--hud-accent);
+  box-shadow: var(--crt-widget-glow);
 }
 
 .hud-zone-slider input[type="range"]::-moz-range-thumb {
-  width: 11px;
-  height: 14px;
-  border-radius: 1px;
+  width: 8px;
+  height: 8px;
+  border-radius: 0;
   background: #e8e8e8;
   border: 1px solid var(--hud-accent);
+  box-shadow: var(--crt-widget-glow);
 }
 
 .hud-h-thumb {
   position: absolute;
   top: 50%;
   left: var(--pct, 50%);
-  width: 11px;
-  height: 14px;
+  width: 8px;
+  height: 8px;
   margin: 0;
   padding: 0;
   transform: translate(-50%, -50%);
-  border-radius: 1px;
+  border-radius: 0;
   background: #e8e8e8;
   border: 1px solid #9a9a9a;
   cursor: grab;
   z-index: 4;
+  box-shadow: var(--crt-widget-glow);
 }
 
 .hud-h-thumb:active {
@@ -658,8 +721,8 @@ body.is-entered #c {
 }
 
 .hud-autoplay {
-  margin-top: 0.15rem;
-  padding-top: 0.45rem;
+  margin-top: 0.2rem;
+  padding-top: 0.55rem;
   border-top: 1px solid rgba(255, 255, 255, 0.04);
   box-shadow: inset 0 1px 0 rgba(200, 210, 220, 0.04);
 }
@@ -674,9 +737,9 @@ body.is-entered #c {
   padding: 0.25rem 0;
   border: 0;
   background: transparent;
-  color: var(--hud-dim);
+  color: #f2f7fc;
   font-family: var(--font-ui);
-  font-size: 0.88rem;
+  font-size: 0.98rem;
   letter-spacing: 0.1em;
   cursor: pointer;
   text-shadow: var(--crt-shadow);
@@ -687,6 +750,7 @@ body.is-entered #c {
 .hud-autoplay-label {
   flex: 1 1 auto;
   text-align: left;
+  color: #f2f7fc;
   text-shadow: var(--crt-shadow);
   -webkit-font-smoothing: none;
   text-rendering: optimizeSpeed;
@@ -694,19 +758,9 @@ body.is-entered #c {
 
 .hud-autoplay-state {
   display: inline-block;
-  color: var(--hud-fg);
+  color: var(--hud-dim);
   min-width: 1.6em;
   text-align: right;
-  /* CRT soft dedicato su ON / OFF */
-  text-shadow:
-    -0.75px 0 rgba(255, 72, 48, 0.42),
-    0.75px 0 rgba(70, 190, 255, 0.34),
-    0 0 1px rgba(235, 238, 242, 0.9),
-    0 0 2.8px rgba(200, 205, 210, 0.55),
-    0 0 5.5px rgba(170, 175, 180, 0.25);
-  filter: blur(0.34px) contrast(1.07) brightness(1.04);
-  -webkit-font-smoothing: none;
-  text-rendering: optimizeSpeed;
 }
 
 .hud-switch {
@@ -720,7 +774,9 @@ body.is-entered #c {
   box-shadow:
     0 0 2.5px rgba(200, 210, 220, 0.18),
     0 0 5px rgba(160, 170, 180, 0.08),
-    inset 0 0 4px rgba(0, 0, 0, 0.5);
+    inset 0 0 4px rgba(0, 0, 0, 0.5),
+    var(--crt-widget-glow);
+  filter: var(--crt-widget-filter);
   transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
@@ -741,7 +797,15 @@ body.is-entered #c {
 }
 
 .hud-autoplay-btn.is-on {
-  color: var(--hud-fg);
+  color: #f2f7fc;
+}
+
+.hud-autoplay-btn.is-on .hud-autoplay-label {
+  color: #f2f7fc;
+}
+
+.hud-autoplay-btn.is-on .hud-autoplay-state {
+  color: var(--hud-dim);
 }
 
 .hud-autoplay-btn.is-on .hud-switch {
@@ -795,7 +859,10 @@ body.is-entered #c {
   box-shadow: 0 0 8px color-mix(in srgb, var(--hud-accent) 60%, transparent);
 }
 
-.hud-root.is-autoplay .hud-readout--zone,
+.hud-root.is-autoplay .hud-readout--zone {
+  color: var(--hud-dim);
+}
+
 .hud-root.is-autoplay .hud-zone-range {
   color: var(--hud-accent);
 }
@@ -803,14 +870,18 @@ body.is-entered #c {
 .hud-foot {
   flex: 0 0 auto;
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  font-size: 0.72rem;
-  letter-spacing: 0.06em;
+  flex-direction: column;
+  align-items: flex-start;
+  flex-wrap: nowrap;
+  gap: 0.06rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
   color: var(--hud-dim);
   border-top: 1px solid rgba(255, 255, 255, 0.04);
   box-shadow: inset 0 1px 0 rgba(200, 210, 220, 0.04);
-  padding-top: 0.35rem;
+  padding-top: 0.45rem;
+  text-transform: uppercase;
+  opacity: 0.88;
 }
 
 /* Autoplay caption — a destra della foto, allineata in alto (pos via JS) */
@@ -850,7 +921,7 @@ body.is-entered #c {
 }
 
 .hud-ww {
-  margin-left: auto;
+  margin-left: 0;
   color: var(--hud-dim);
 }
 
@@ -901,14 +972,19 @@ body.is-entered #c {
   }
 
   .hud {
-    width: min(8rem, 26vw);
+    width: min(8.5rem, 28vw);
     height: 100vh;
-    gap: 0.45rem;
-    padding: 0.5rem 0.4rem;
+    height: 100dvh;
+    gap: 0.7rem;
+    padding: 0.55rem 0.55rem 0.55rem 0.45rem;
   }
 
   .hud-title {
-    font-size: 1.05rem;
+    font-size: 1.1rem;
+  }
+
+  .hud-controls {
+    gap: 0.85rem;
   }
 
   .gate-title {

@@ -6,7 +6,7 @@
 import { ZONE_ORDER, zoneConfig, zoneFromBpm } from "./zones.js";
 
 function projectTrack(track) {
-  if (!track?.length) return [];
+  if (!track?.length) return Object.assign([], { geoAspect: 1 });
   let minLat = Infinity;
   let maxLat = -Infinity;
   let minLon = Infinity;
@@ -19,19 +19,56 @@ function projectTrack(track) {
   }
   const dLat = Math.max(maxLat - minLat, 1e-6);
   const dLon = Math.max(maxLon - minLon, 1e-6);
-  const pad = 0.08;
-  return track.map((p) => {
-    const nx = (p.lon - minLon) / dLon;
-    const ny = (p.lat - minLat) / dLat;
+  // Equirectangular correction so lon/lat keep real proportions
+  const midLatRad = (((minLat + maxLat) * 0.5) * Math.PI) / 180;
+  const lonScale = Math.max(Math.cos(midLatRad), 0.2);
+  const geoAspect = Math.max((dLon * lonScale) / dLat, 1e-6);
+
+  const pts = track.map((p) => {
     const bpm = Number(p.bpm);
     return {
-      x: pad + nx * (1 - pad * 2),
-      y: pad + (1 - ny) * (1 - pad * 2),
+      nx: (p.lon - minLon) / dLon,
+      ny: 1 - (p.lat - minLat) / dLat,
       zone: Number.isFinite(bpm) ? zoneFromBpm(bpm) : Number(p.zone) || 1,
       bpm: Number.isFinite(bpm) ? bpm : 0,
       time: p.time,
     };
   });
+  pts.geoAspect = geoAspect;
+  return pts;
+}
+
+/** Fit geo-normalized track into canvas without distorting aspect ratio. */
+function trackLayout(cssW, cssH, geoAspect) {
+  const pad = 0.07;
+  const availW = Math.max(1, cssW * (1 - pad * 2));
+  const availH = Math.max(1, cssH * (1 - pad * 2));
+  const boxAspect = availW / availH;
+  const aspect = Math.max(Number(geoAspect) || 1, 1e-6);
+  let drawW;
+  let drawH;
+  if (boxAspect > aspect) {
+    drawH = availH;
+    drawW = drawH * aspect;
+  } else {
+    drawW = availW;
+    drawH = drawW / aspect;
+  }
+  return {
+    ox: (cssW - drawW) * 0.5,
+    oy: (cssH - drawH) * 0.5,
+    drawW,
+    drawH,
+  };
+}
+
+function toScreen(p, layout) {
+  return {
+    x: layout.ox + p.nx * layout.drawW,
+    y: layout.oy + p.ny * layout.drawH,
+    zone: p.zone,
+    bpm: p.bpm,
+  };
 }
 
 function bindHorizontalSlider(el, { value, onChange, valueEl } = {}) {
@@ -91,7 +128,10 @@ function bindHorizontalSlider(el, { value, onChange, valueEl } = {}) {
 
 /**
  * @param {HTMLElement} root
- * @param {{ track?: any[], startZone?: number, soundVol?: number, heartVol?: number, onZoneChange?: Function, onSoundChange?: Function, onHeartChange?: Function, onAutoplayChange?: Function, onTrackSeek?: Function, title?: string }} opts
+ * @param {{ track?: any[], startZone?: number, soundVol?: number, heartVol?: number, onZoneChange?: Function, onSoundChange?: Function, onHeartChange?: Function, onAutoplayChange?: Function, onTrackSeek?: Function, title?: string, report?: {
+ *   examId?: string, series?: string, patientId?: string, patientName?: string, scanDate?: string,
+ *   bpmMin?: number, bpmMax?: number, kv?: number, ma?: number, hikeType?: string, location?: string, duration?: string, distance?: string
+ * } }} opts
  */
 export function createHudSidebar(
   root,
@@ -106,8 +146,24 @@ export function createHudSidebar(
     onAutoplayChange,
     onTrackSeek,
     title = "PEAK PROMPT",
+    report = {},
   } = {}
 ) {
+  const examId = report.examId || "CT-2026-991";
+  const series = report.series || "3D CARDIAC RECON";
+  const patientId = report.patientId || "HK-8842";
+  const scanDate = report.scanDate || "02 OCT 2026";
+  const bpmMin = Number.isFinite(Number(report.bpmMin)) ? Math.round(Number(report.bpmMin)) : 87;
+  const bpmMax = Number.isFinite(Number(report.bpmMax)) ? Math.round(Number(report.bpmMax)) : 184;
+  const kv = report.kv ?? 120;
+  const ma = report.ma ?? 400;
+  const hikeType = report.hikeType || "TREKKING";
+  const location = report.location || "FALZAREGO · LAGAZUOI";
+  const endBpm = Number.isFinite(Number(report.endBpm))
+    ? Math.round(Number(report.endBpm))
+    : 111;
+  const duration = report.duration || "02:32:59";
+  const distance = report.distance || "3.31 KM";
   const pts = projectTrack(track);
   let zone = startZone;
   let autoplay = false;
@@ -126,11 +182,13 @@ export function createHudSidebar(
     <aside class="hud" aria-label="Cardiac CT diagnostics">
       <header class="hud-head">
         <div class="hud-title">${title}</div>
-        <div class="hud-sub">TAC CARDIACA · DICOM</div>
+        <div class="hud-sub">CARDIAC CT · DICOM</div>
         <div class="hud-meta">
-          <span>EX: 6868</span>
-          <span>SE: 6</span>
-          <span>IM: 51</span>
+          <span>EXAM ID: ${examId}</span>
+          <span>SERIES: ${series}</span>
+          <span>PATIENT ID: ${patientId}</span>
+          <span>SCAN DATE: ${scanDate}</span>
+          <span>LOCATION: ${location}</span>
         </div>
       </header>
 
@@ -195,9 +253,10 @@ export function createHudSidebar(
       </section>
 
       <footer class="hud-foot">
-        <span>kV 100</span>
-        <span>mA 400</span>
-        <span class="hud-ww">WW: 400 WL: 40</span>
+        <span>BPM ${bpmMin}-${bpmMax}</span>
+        <span>PEAK PULSE ${endBpm} BPM</span>
+        <span>kV ${kv} / mA ${ma}</span>
+        <span class="hud-ww">${hikeType} · ${duration} · ${distance}</span>
       </footer>
     </aside>
   `;
@@ -211,6 +270,10 @@ export function createHudSidebar(
   const autoplayBtn = root.querySelector("[data-autoplay]");
   const autoplayState = root.querySelector("[data-autoplay-state]");
   const zoneSlider = root.querySelector("[data-zone-slider]");
+
+  function currentLayout(cssW, cssH) {
+    return trackLayout(cssW, cssH, pts.geoAspect || 1);
+  }
 
   function drawTrack() {
     if (!ctx || !canvas) return;
@@ -233,6 +296,7 @@ export function createHudSidebar(
       return;
     }
 
+    const layout = currentLayout(cssW, cssH);
     const accent = zoneConfig(zone).accent;
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
@@ -242,11 +306,13 @@ export function createHudSidebar(
       for (let i = 0; i < pts.length - 1; i += 1) {
         const z = pts[i].zone;
         const col = zoneConfig(z).accent;
+        const a = toScreen(pts[i], layout);
+        const b = toScreen(pts[i + 1], layout);
         ctx.beginPath();
         ctx.strokeStyle = col;
         ctx.lineWidth = 3.1;
-        ctx.moveTo(pts[i].x * cssW, pts[i].y * cssH);
-        ctx.lineTo(pts[i + 1].x * cssW, pts[i + 1].y * cssH);
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
         ctx.stroke();
       }
     } else {
@@ -255,10 +321,9 @@ export function createHudSidebar(
       ctx.strokeStyle = "rgba(180, 190, 200, 0.28)";
       ctx.lineWidth = 2.2;
       for (let i = 0; i < pts.length; i += 1) {
-        const x = pts[i].x * cssW;
-        const y = pts[i].y * cssH;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+        const p = toScreen(pts[i], layout);
+        if (i === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
       }
       ctx.stroke();
 
@@ -270,17 +335,15 @@ export function createHudSidebar(
       let drawing = false;
       for (let i = 0; i < pts.length - 1; i += 1) {
         const edgeZone = pts[i].zone;
-        const x0 = pts[i].x * cssW;
-        const y0 = pts[i].y * cssH;
-        const x1 = pts[i + 1].x * cssW;
-        const y1 = pts[i + 1].y * cssH;
+        const a = toScreen(pts[i], layout);
+        const b = toScreen(pts[i + 1], layout);
         if (edgeZone === zone) {
           if (!drawing) {
             ctx.beginPath();
-            ctx.moveTo(x0, y0);
+            ctx.moveTo(a.x, a.y);
             drawing = true;
           }
-          ctx.lineTo(x1, y1);
+          ctx.lineTo(b.x, b.y);
         } else if (drawing) {
           ctx.stroke();
           drawing = false;
@@ -290,34 +353,34 @@ export function createHudSidebar(
       ctx.shadowBlur = 0;
     }
 
-    // Endpoint markers
-    const a = pts[0];
-    const b = pts[pts.length - 1];
+    // Endpoint markers (start + end, same gray)
+    const a = toScreen(pts[0], layout);
+    const b = toScreen(pts[pts.length - 1], layout);
     ctx.fillStyle = "rgba(220,230,240,0.7)";
     ctx.beginPath();
-    ctx.arc(a.x * cssW, a.y * cssH, 3, 0, Math.PI * 2);
+    ctx.arc(a.x, a.y, 3, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = zoneConfig(b.zone || 4).accent;
     ctx.beginPath();
-    ctx.arc(b.x * cssW, b.y * cssH, 3.5, 0, Math.PI * 2);
+    ctx.arc(b.x, b.y, 3, 0, Math.PI * 2);
     ctx.fill();
 
     // Pallino progresso continuo (autoplay / scrub)
     if (progressPos >= 0 && pts.length) {
       const p = samplePath(progressPos);
       if (p) {
+        const s = toScreen(p, layout);
         const dotAccent = zoneConfig(p.zone || zone).accent;
         ctx.fillStyle = "#ffffff";
         ctx.shadowColor = dotAccent;
         ctx.shadowBlur = 10;
         ctx.beginPath();
-        ctx.arc(p.x * cssW, p.y * cssH, 4.2, 0, Math.PI * 2);
+        ctx.arc(s.x, s.y, 4.2, 0, Math.PI * 2);
         ctx.fill();
         ctx.shadowBlur = 0;
         ctx.strokeStyle = dotAccent;
         ctx.lineWidth = 1.4;
         ctx.beginPath();
-        ctx.arc(p.x * cssW, p.y * cssH, 5.5, 0, Math.PI * 2);
+        ctx.arc(s.x, s.y, 5.5, 0, Math.PI * 2);
         ctx.stroke();
       }
     }
@@ -333,8 +396,8 @@ export function createHudSidebar(
     const a = pts[i];
     const b = pts[Math.min(n - 1, i + 1)];
     return {
-      x: a.x + (b.x - a.x) * f,
-      y: a.y + (b.y - a.y) * f,
+      nx: a.nx + (b.nx - a.nx) * f,
+      ny: a.ny + (b.ny - a.ny) * f,
       zone: f < 0.5 ? a.zone : b.zone,
     };
   }
@@ -417,13 +480,15 @@ export function createHudSidebar(
     if (rect.width <= 0 || rect.height <= 0) {
       return progressPos >= 0 ? Math.round(progressPos) : 0;
     }
-    const nx = (clientX - rect.left) / rect.width;
-    const ny = (clientY - rect.top) / rect.height;
+    const layout = currentLayout(rect.width, rect.height);
+    const sx = clientX - rect.left;
+    const sy = clientY - rect.top;
     let best = 0;
     let bestD = Infinity;
     for (let i = 0; i < pts.length; i += 1) {
-      const dx = pts[i].x - nx;
-      const dy = pts[i].y - ny;
+      const p = toScreen(pts[i], layout);
+      const dx = p.x - sx;
+      const dy = p.y - sy;
       const d = dx * dx + dy * dy;
       if (d < bestD) {
         bestD = d;
