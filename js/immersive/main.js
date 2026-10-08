@@ -481,10 +481,9 @@ function bindStartGate() {
   });
 
   const runSequence = async () => {
-    // 1) Titolo — fade-in, poi morph
+    // 1) Titolo — leggerissimo fade-in mentre inizia a comporsi
     if (title) {
       title.classList.add("is-in");
-      await new Promise((r) => setTimeout(r, 180));
       await gateMorph(title, fullText, {
         slowLock: 160,
         fastLock: 108,
@@ -493,7 +492,7 @@ function bindStartGate() {
       });
     }
 
-    // 2) Info DICOM — fade-in, poi morph sincronizzati (fine comune)
+    // 2) Info DICOM — leggero fade-in mentre iniziano a comporsi
     await new Promise((r) => setTimeout(r, 300));
     applyGateHikeStats();
     metaLines.forEach((line) => {
@@ -501,7 +500,6 @@ function bindStartGate() {
       line.style.minWidth = `${finalText.length}ch`;
     });
     corners.forEach((corner) => corner.classList.add("is-in"));
-    await new Promise((r) => setTimeout(r, 200));
 
     const INFO_MORPH_MS = 3400;
     await Promise.all(
@@ -511,10 +509,9 @@ function bindStartGate() {
       })
     );
 
-    // 3) ACCESS — fade-in + morph, poi pulse soft
+    // 3) ACCESS — leggerissimo fade-in mentre inizia a comporsi
     await new Promise((r) => setTimeout(r, 280));
     btn.classList.add("is-in");
-    await new Promise((r) => setTimeout(r, 140));
     await gateMorph(btn, ctaText, {
       slowLock: 152,
       fastLock: 112,
@@ -541,6 +538,7 @@ function bindStartGate() {
     gate.setAttribute("aria-hidden", "true");
     document.body.classList.add("is-entered");
     btn.classList.remove("is-loading");
+    btn.blur();
     // Leave ACCESS diamond → square for exploration
     state.cursor?.reset?.();
 
@@ -584,6 +582,10 @@ function setupThree(canvas) {
   controls.maxDistance = 400;
   controls.enabled = false;
 
+  // Receive focus without needing an extra click after ACCESS
+  canvas.tabIndex = 0;
+  canvas.setAttribute("aria-label", "Immersive sphere view");
+
   // Vista iniziale: tutta la sfera (raggio fisso) con margine
   frameWholeSphere(camera, controls, SPHERE_RADIUS);
 
@@ -591,6 +593,43 @@ function setupThree(canvas) {
   state.scene = scene;
   state.camera = camera;
   state.controls = controls;
+
+  // Zoom subito dopo l’intro (senza dover cliccare prima la canvas)
+  const _zoomOffset = new THREE.Vector3();
+  window.addEventListener(
+    "wheel",
+    (e) => {
+      if (!state.navReady || !controls.enabled) return;
+      if (state.autoplayOn || state.isInspectingMedia) return;
+      if (state.mediaFocus?.animating) return;
+      if (
+        e.target?.closest?.(
+          'input, textarea, select, button, .hud, .hud-zone-slider, .hud-h-slider, .hud-track, [role="slider"]'
+        )
+      ) {
+        return;
+      }
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      _zoomOffset.copy(camera.position).sub(controls.target);
+      const dist = _zoomOffset.length();
+      if (dist < 1e-6) return;
+
+      // deltaY > 0 → zoom out (lontano dal target)
+      const factor = Math.exp(0.0018 * (controls.zoomSpeed || 1) * e.deltaY);
+      const next = THREE.MathUtils.clamp(
+        dist * factor,
+        controls.minDistance,
+        controls.maxDistance
+      );
+      _zoomOffset.multiplyScalar(next / dist);
+      camera.position.copy(controls.target).add(_zoomOffset);
+      controls.update();
+    },
+    { passive: false, capture: true }
+  );
 
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -613,11 +652,13 @@ function frameWholeSphere(camera, controls, radius, padding = 1.45) {
 function enableOrbitNav() {
   const controls = state.controls;
   const camera = state.camera;
+  const canvas = state.renderer?.domElement;
   if (!controls || !camera) return;
 
   const R = SPHERE_RADIUS;
   const maxDist = Math.max(R * 2.9, frameDistance(R, camera, 1.45));
 
+  camera.up.set(0, 1, 0);
   controls.enabled = true;
   controls.enableZoom = true;
   controls.enableRotate = true;
@@ -627,6 +668,22 @@ function enableOrbitNav() {
   controls.target.set(0, 0, 0);
   controls.update();
   state.navReady = true;
+
+  // Drop focus from ACCESS so wheel/drag work immediately
+  try {
+    document.activeElement?.blur?.();
+  } catch {
+    /* ignore */
+  }
+  if (canvas) {
+    requestAnimationFrame(() => {
+      try {
+        canvas.focus({ preventScroll: true });
+      } catch {
+        canvas.focus?.();
+      }
+    });
+  }
 }
 
 function frameDistance(radius, camera, padding = 1.45) {
@@ -885,11 +942,15 @@ function animate() {
   const elapsed = state.clock.elapsedTime;
   const transport = state.audio.getSyncTime(elapsed);
   const inspecting = state.isInspectingMedia;
+  const approaching = !!state.mediaFocus?.isApproaching;
 
   if (state.sphere?.group && !state.autoplayOn && !inspecting) {
     state.sphere.group.rotation.y += delta * sphereSpinRate;
   }
-  applyHeartbeat(state.sphere, transport, state.avgBpm, { frozen: inspecting });
+  // During approach: spin frozen (inspecting) but media keep contracting
+  applyHeartbeat(state.sphere, transport, state.avgBpm, {
+    frozen: inspecting && !approaching,
+  });
   if (state.started) keepVideosPlaying(state.sphere);
 
   if (state.navReady && state.controls?.enabled && !state.autoplayOn && !inspecting) {

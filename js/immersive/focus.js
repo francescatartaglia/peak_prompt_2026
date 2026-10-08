@@ -11,22 +11,24 @@ import { mediaHoverLines } from "./mediaHover.js";
 
 const CLICK_MAX_DIST = 7;
 const CLICK_MAX_MS = 450;
-const FOCUS_DURATION = 1.35;
-const UNFOCUS_DURATION = 1.25;
+const FOCUS_DURATION = 0.72;
+const UNFOCUS_DURATION = 0.9;
+const FOCUS_EASE = "power2.inOut";
 /**
- * Outside approach: horizontal circumnavigation outside the shell,
- * lateral entry beside the photo, then a smooth turn to face it.
+ * Outside → inside: spherical orbit around the photo + exponential follow
+ * (same idea as gigadesign media-wall focus).
  */
-const APPROACH_DURATION = 3.6;
+const APPROACH_DURATION = 0.85;
+const APPROACH_FOLLOW = 12;
+/** Inside only: camera recenter + morph (outside keeps FOCUS_DURATION). */
+const FACE_INSIDE_DURATION = 0.85;
+const FOCUS_INSIDE_DURATION = 0.5;
 const EXIT_CENTER_FRAC = 0.18;
 const FRAME_DIST = 5.35;
 const DESIRED_H = 2.15;
 /** Others fully hidden while inspecting. */
 const DIM_OPACITY = 0;
 const EASE = "sine.inOut";
-const APPROACH_EASE = "sine.inOut";
-/** Keep this clearance outside the sphere while orbiting. */
-const SKIM_FRAC = 1.22;
 
 export function createFocusController({
   camera,
@@ -57,13 +59,20 @@ export function createFocusController({
   const _startQuat = new THREE.Quaternion();
   const _endQuat = new THREE.Quaternion();
   const _tmpQuat = new THREE.Quaternion();
-  const _gateDir = new THREE.Vector3();
-  const _mediaDir = new THREE.Vector3();
   const _worldUp = new THREE.Vector3(0, 1, 0);
-  const _origin = new THREE.Vector3(0, 0, 0);
+  const _mediaUp = new THREE.Vector3();
+  const _startUp = new THREE.Vector3();
+  const _camUp = new THREE.Vector3();
+  const _guideCam = new THREE.Vector3();
+  const _guideLook = new THREE.Vector3();
+  const _sph0 = new THREE.Spherical();
+  const _sph1 = new THREE.Spherical();
+  const _sph = new THREE.Spherical();
 
   let focused = null;
   let animating = false;
+  /** True while flying to face the photo — spin frozen, heartbeat still live. */
+  let approaching = false;
   let isInspectingMedia = false;
   let activeTween = null;
   let domElement = null;
@@ -272,15 +281,37 @@ export function createFocusController({
     };
   }
 
+  /** Inside park: photo centered in view and upright (mesh local +Y). */
   function parkPoseForMedia(mesh) {
+    mesh.updateWorldMatrix?.(true, false);
+    mesh.updateMatrixWorld?.(true);
     mesh.getWorldPosition(_mediaPos);
-    const R = sphereRadius();
-    _outward.copy(_mediaPos).normalize();
+    mesh.getWorldQuaternion(_tmpQuat);
+    _outward.set(0, 0, 1).applyQuaternion(_tmpQuat).normalize();
+    _mediaUp.set(0, 1, 0).applyQuaternion(_tmpQuat).normalize();
     if (_outward.lengthSq() < 1e-8) _outward.set(0, 0.1, 1).normalize();
+    // Keep up orthogonal to view so lookAt has no twist
+    _mediaUp.addScaledVector(_outward, -_mediaUp.dot(_outward));
+    if (_mediaUp.lengthSq() < 1e-8) _mediaUp.copy(_worldUp);
+    else _mediaUp.normalize();
+
     focusLookAt = _mediaPos.clone();
+    const R = sphereRadius();
     const near = THREE.MathUtils.clamp(R * EXIT_CENTER_FRAC, 6, 14);
     _camPos.copy(_outward).multiplyScalar(near);
-    return { cam: _camPos.clone(), target: _mediaPos.clone() };
+    return {
+      cam: _camPos.clone(),
+      target: _mediaPos.clone(),
+      up: _mediaUp.clone(),
+    };
+  }
+
+  /** Face the photo without OrbitControls Y-up reset. */
+  function applyParkView(park) {
+    camera.position.copy(park.cam);
+    camera.up.copy(park.up || _worldUp);
+    controls.target.copy(park.target);
+    camera.lookAt(park.target);
   }
 
   function exitCameraPose() {
@@ -335,155 +366,181 @@ export function createFocusController({
     });
   }
 
-  function shortestAzimuthDelta(a0, a1) {
-    let d = a1 - a0;
-    while (d > Math.PI) d -= Math.PI * 2;
-    while (d < -Math.PI) d += Math.PI * 2;
-    return d;
-  }
-
-  /** Horizontal orbit around Y: azimuth blend + soft elevation blend. */
-  function dirFromAzimuthElev(azimuth, y, out) {
-    const yy = THREE.MathUtils.clamp(y, -0.95, 0.95);
-    const xz = Math.sqrt(Math.max(0, 1 - yy * yy));
-    out.set(Math.sin(azimuth) * xz, yy, Math.cos(azimuth) * xz);
-    return out.normalize();
-  }
-
-  /** Side gate beside the photo (horizontal perpendicular), closer to the camera. */
-  function lateralGateDir(mediaDir, fromDir, out) {
-    out.crossVectors(mediaDir, _worldUp);
-    if (out.lengthSq() < 1e-6) out.set(1, 0, 0);
-    else out.normalize();
-    const aFrom = Math.atan2(fromDir.x, fromDir.z);
-    const aPos = Math.atan2(out.x, out.z);
-    const aNeg = Math.atan2(-out.x, -out.z);
-    if (Math.abs(shortestAzimuthDelta(aFrom, aNeg)) < Math.abs(shortestAzimuthDelta(aFrom, aPos))) {
-      out.negate();
-    }
-    const y = THREE.MathUtils.clamp(mediaDir.y * 0.35, -0.35, 0.35);
-    const xz = Math.sqrt(Math.max(0, 1 - y * y));
-    const lenXZ = Math.hypot(out.x, out.z) || 1;
-    out.set((out.x / lenXZ) * xz, y, (out.z / lenXZ) * xz).normalize();
-    return out;
-  }
-
   /**
-   * One continuous horizontal path: orbit outside → lateral entry while
-   * already easing the gaze toward the photo (no snap between phases).
+   * Fluid orbit into the photo (gigadesign-style):
+   * spherical lerp around the image + exponential camera follow.
+   * Camera always looks at the photo.
    */
   function approachFromOutside(park) {
     return new Promise((resolve) => {
       killTween();
-      const R = sphereRadius();
-      const skim = R * SKIM_FRAC;
-      const near = Math.max(park.cam.length(), R * EXIT_CENTER_FRAC);
-
       _startCam.copy(camera.position);
-      _startTarget.copy(controls.target);
-      if (_startCam.lengthSq() < 1e-8) _startCam.set(0, 0.2, 1);
-      const fromLen = Math.max(_startCam.length(), skim);
-      _startDir.copy(_startCam).normalize();
+      _startUp.copy(camera.up).normalize();
+      const endUp = park.up || _worldUp;
+      const pivot = park.target;
 
-      _mediaDir.copy(park.target);
-      if (_mediaDir.lengthSq() < 1e-8) _mediaDir.copy(park.cam);
-      _mediaDir.normalize();
-      lateralGateDir(_mediaDir, _startDir, _gateDir);
+      // Orbit relative to the photo so gaze stays locked on it
+      _dir.copy(_startCam).sub(pivot);
+      if (_dir.lengthSq() < 1e-8) _dir.set(0, 0.2, 1);
+      _sph0.setFromVector3(_dir);
+      _dir.copy(park.cam).sub(pivot);
+      if (_dir.lengthSq() < 1e-8) _dir.copy(pivot).normalize().multiplyScalar(-1);
+      _sph1.setFromVector3(_dir);
 
-      const a0 = Math.atan2(_startDir.x, _startDir.z);
-      const aGate = Math.atan2(_gateDir.x, _gateDir.z);
-      const aMedia = Math.atan2(_mediaDir.x, _mediaDir.z);
-      const d0 = shortestAzimuthDelta(a0, aGate);
-      const d1 = shortestAzimuthDelta(aGate, aMedia);
-      const y0 = _startDir.y;
-      const yGate = _gateDir.y;
-      const yMedia = _mediaDir.y;
+      let dTheta = _sph1.theta - _sph0.theta;
+      while (dTheta > Math.PI) dTheta -= Math.PI * 2;
+      while (dTheta < -Math.PI) dTheta += Math.PI * 2;
 
       if (typeof gsap === "undefined") {
-        camera.position.copy(park.cam);
-        controls.target.copy(park.target);
-        controls.update();
+        applyParkView(park);
         resolve();
         return;
       }
 
-      const state = { t: 0 };
+      const state = { u: 0 };
+      let lastT = performance.now();
       activeTween = gsap.to(state, {
-        t: 1,
+        u: 1,
         duration: APPROACH_DURATION,
-        ease: APPROACH_EASE,
+        ease: "power2.inOut",
         onUpdate: () => {
-          const t = state.t;
+          const now = performance.now();
+          const dt = Math.min(64, Math.max(0, now - lastT));
+          lastT = now;
+          const e = state.u;
 
-          // Wider smoothsteps = longer overlaps, less perceptible transitions
-          const leg1 = THREE.MathUtils.smoothstep(t, 0, 0.62);
-          const leg2 = THREE.MathUtils.smoothstep(t, 0.28, 1);
-          const azimuth = a0 + d0 * leg1 + d1 * leg2;
-          const elev = THREE.MathUtils.lerp(
-            THREE.MathUtils.lerp(y0, yGate, leg1),
-            THREE.MathUtils.lerp(yGate, yMedia, leg2),
-            THREE.MathUtils.smoothstep(t, 0.25, 1)
-          );
-          dirFromAzimuthElev(azimuth, elev, _dir);
+          _sph.radius = THREE.MathUtils.lerp(_sph0.radius, _sph1.radius, e);
+          _sph.phi = THREE.MathUtils.lerp(_sph0.phi, _sph1.phi, e);
+          _sph.theta = _sph0.theta + dTheta * e;
+          _sph.makeSafe();
 
-          const toSkim = THREE.MathUtils.smoothstep(t, 0, 0.48);
-          const toInside = THREE.MathUtils.smoothstep(t, 0.32, 0.95);
-          let len = THREE.MathUtils.lerp(fromLen, skim, toSkim);
-          len = THREE.MathUtils.lerp(len, near, toInside);
-          if (t < 0.36) len = Math.max(len, skim);
+          _guideLook.copy(pivot);
+          _guideCam.setFromSpherical(_sph).add(_guideLook);
 
-          camera.position.copy(_dir).multiplyScalar(len);
-
-          const toCenter = THREE.MathUtils.smoothstep(t, 0, 0.55);
-          const toPhoto = THREE.MathUtils.smoothstep(t, 0.22, 1);
-          _pos.lerpVectors(_startTarget, _origin, toCenter);
-          controls.target.lerpVectors(_pos, park.target, toPhoto);
-          controls.update();
+          // Soft follow — kills the mechanical step feel
+          const k = 1 - Math.exp((-APPROACH_FOLLOW * dt) / 1000);
+          camera.position.lerp(_guideCam, k);
+          controls.target.lerp(_guideLook, Math.min(1, k * 1.15));
+          _camUp.lerpVectors(_startUp, endUp, e).normalize();
+          camera.up.copy(_camUp);
+          camera.lookAt(controls.target);
         },
         onComplete: () => {
           activeTween = null;
-          camera.position.copy(park.cam);
-          controls.target.copy(park.target);
-          controls.update();
+          applyParkView(park);
           resolve();
         },
       });
     });
   }
 
+  /** Same morph curve for every media (inside + outside). */
+  function morphEase(t) {
+    const u = THREE.MathUtils.clamp(t, 0, 1);
+    return u * u * (3 - 2 * u);
+  }
+
+  function beginInspectMesh(mesh) {
+    captureCurved(mesh);
+    pullToScene(mesh);
+    mesh.userData.inspectLock = true;
+    mesh.userData.focusRenderOrder = mesh.renderOrder;
+    mesh.renderOrder = 10000;
+    mesh.userData.inspectFlat = false;
+  }
+
+  function finishInspectMesh(mesh, park, endScale) {
+    flattenGeometry(mesh.geometry);
+    mesh.userData.inspectFlat = true;
+    mesh.geometry.computeVertexNormals();
+    applyParkView(park);
+    const pose = framePose();
+    mesh.position.copy(pose.position);
+    mesh.quaternion.copy(pose.quaternion);
+    mesh.scale.setScalar(endScale);
+  }
+
+  function applyInspectMorph(mesh, park, mt, startScale, endScale, dimList) {
+    applyParkView(park);
+    const pose = framePose();
+    mesh.position.lerpVectors(_startPos, pose.position, mt);
+    _endQuat.copy(pose.quaternion);
+    _tmpQuat.copy(_startQuat).slerp(_endQuat, mt);
+    mesh.quaternion.copy(_tmpQuat);
+    mesh.scale.setScalar(THREE.MathUtils.lerp(startScale, endScale, mt));
+    morphGeometry(mesh, mt);
+    const dim = THREE.MathUtils.lerp(1, DIM_OPACITY, THREE.MathUtils.smoothstep(mt, 0, 0.9));
+    for (const m of dimList) setMeshOpacity(m, dim);
+  }
+
   /**
-   * One continuous flight: camera + mesh pose + unbend morph + dim.
-   * Masks the sphere→flat handoff. Assumes camera already inside.
+   * Inside only: slowly, smoothly bring the photo to center.
+   * Does not touch zoom/morph speed (that's morphIntoInspect / FOCUS_DURATION).
    */
-  function morphIntoInspect(mesh, park) {
+  function faceMediaFromInside(park) {
     return new Promise((resolve) => {
       killTween();
-      captureCurved(mesh);
-      pullToScene(mesh);
-      mesh.userData.inspectLock = true;
-      mesh.userData.focusRenderOrder = mesh.renderOrder;
-      mesh.renderOrder = 10000;
-      mesh.userData.inspectFlat = false;
-
       _startCam.copy(camera.position);
       _startTarget.copy(controls.target);
+      _startUp.copy(camera.up).normalize();
+      const endUp = park.up || _worldUp;
+
+      if (typeof gsap === "undefined") {
+        applyParkView(park);
+        resolve();
+        return;
+      }
+
+      const state = { u: 0 };
+      activeTween = gsap.to(state, {
+        u: 1,
+        duration: FACE_INSIDE_DURATION,
+        ease: "sine.inOut",
+        onUpdate: () => {
+          const e = state.u;
+          camera.position.lerpVectors(_startCam, park.cam, e);
+          controls.target.lerpVectors(_startTarget, park.target, e);
+          _camUp.lerpVectors(_startUp, endUp, e).normalize();
+          camera.up.copy(_camUp);
+          camera.lookAt(controls.target);
+        },
+        onComplete: () => {
+          activeTween = null;
+          applyParkView(park);
+          resolve();
+        },
+      });
+    });
+  }
+
+  /** Inside: faster recenter, then faster zoom/rotation. */
+  async function inspectFromInside(mesh, park) {
+    await faceMediaFromInside(park);
+    if (!focused) return;
+    approaching = false;
+    for (const m of getMeshes?.() || []) {
+      if (m && !m.userData?.slideshowLock) m.scale.setScalar(1);
+    }
+    await morphIntoInspect(mesh, park, FOCUS_INSIDE_DURATION);
+  }
+
+  /**
+   * Shared media rotation/zoom. Optional duration (inside uses a quicker one).
+   */
+  function morphIntoInspect(mesh, park, duration = FOCUS_DURATION) {
+    return new Promise((resolve) => {
+      killTween();
+      applyParkView(park);
+      beginInspectMesh(mesh);
+
       _startPos.copy(mesh.position);
       _startQuat.copy(mesh.quaternion);
       const startScale = mesh.scale.x;
       const endScale = flatScale(mesh);
-      // Opacity of siblings drops with zoom+rotation (not during outside approach)
       const dimList = dimOthers(mesh);
 
       if (typeof gsap === "undefined") {
-        camera.position.copy(park.cam);
-        controls.target.copy(park.target);
-        controls.update();
-        const pose = framePose();
-        mesh.position.copy(pose.position);
-        mesh.quaternion.copy(pose.quaternion);
-        mesh.scale.setScalar(endScale);
-        flattenGeometry(mesh.geometry);
-        mesh.userData.inspectFlat = true;
+        finishInspectMesh(mesh, park, endScale);
         for (const m of dimList) setMeshOpacity(m, DIM_OPACITY);
         resolve();
         return;
@@ -492,35 +549,15 @@ export function createFocusController({
       const state = { t: 0 };
       activeTween = gsap.to(state, {
         t: 1,
-        duration: FOCUS_DURATION,
-        ease: EASE,
+        duration,
+        ease: FOCUS_EASE,
         onUpdate: () => {
-          const t = state.t;
-          camera.position.lerpVectors(_startCam, park.cam, t);
-          controls.target.lerpVectors(_startTarget, park.target, t);
-          controls.update();
-
-          const pose = framePose();
-          mesh.position.lerpVectors(_startPos, pose.position, t);
-          _endQuat.copy(pose.quaternion);
-          _tmpQuat.copy(_startQuat).slerp(_endQuat, t);
-          mesh.quaternion.copy(_tmpQuat);
-          mesh.scale.setScalar(THREE.MathUtils.lerp(startScale, endScale, t));
-
-          morphGeometry(mesh, t);
-
-          const dim = THREE.MathUtils.lerp(1, DIM_OPACITY, t);
-          for (const m of dimList) setMeshOpacity(m, dim);
+          const mt = morphEase(state.t);
+          applyInspectMorph(mesh, park, mt, startScale, endScale, dimList);
         },
         onComplete: () => {
           activeTween = null;
-          flattenGeometry(mesh.geometry);
-          mesh.userData.inspectFlat = true;
-          mesh.geometry.computeVertexNormals();
-          const pose = framePose();
-          mesh.position.copy(pose.position);
-          mesh.quaternion.copy(pose.quaternion);
-          mesh.scale.setScalar(endScale);
+          finishInspectMesh(mesh, park, endScale);
           resolve();
         },
       });
@@ -604,31 +641,37 @@ export function createFocusController({
 
     focused = mesh;
     animating = true;
+    approaching = true;
+    // Freeze sphere spin so the photo stays put while we face it
     setInspecting(true);
     if (controls) controls.enabled = false;
     hideCaption();
 
-    for (const m of getMeshes?.() || []) {
-      if (m && !m.userData?.slideshowLock) m.scale.setScalar(1);
-    }
-
-    mesh.getWorldPosition(_mediaPos);
-    focusLookAt = _mediaPos.clone();
     const park = parkPoseForMedia(mesh);
     const R = sphereRadius();
     const outside = camera.position.length() > R * 0.85;
 
-    // From outside: enter + face photo in one soft move, then same zoom+rotation
     if (outside) {
+      // Outside: fly in always looking at the photo, then morph
       await approachFromOutside(park);
       if (!focused) {
+        approaching = false;
         animating = false;
         return;
       }
+      applyParkView(park);
+      approaching = false;
+      for (const m of getMeshes?.() || []) {
+        if (m && !m.userData?.slideshowLock) m.scale.setScalar(1);
+      }
+      await morphIntoInspect(mesh, park);
+    } else {
+      // Inside: rotation/morph starts early while camera centers
+      await inspectFromInside(mesh, park);
     }
 
-    await morphIntoInspect(mesh, park);
     if (!focused) {
+      approaching = false;
       animating = false;
       return;
     }
@@ -759,6 +802,9 @@ export function createFocusController({
     },
     get isInspectingMedia() {
       return isInspectingMedia;
+    },
+    get isApproaching() {
+      return approaching;
     },
   };
 }
