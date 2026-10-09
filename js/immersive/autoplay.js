@@ -282,7 +282,7 @@ export function createAutoplayController(opts) {
         ? Number(asset.trackIndex)
         : idx;
     pathCursor = at;
-    onProgress?.(at);
+    onProgress?.(at, { seek: true, immediate: true });
   }
 
   function trackIndexOf(asset, fallback = 0) {
@@ -301,22 +301,22 @@ export function createAutoplayController(opts) {
   }
 
   /**
-   * Avanza il pallino in modo continuo da from→to lungo il GPX
-   * durante la durata della slide (in relazione al media mostrato).
+   * Avanza il pallino con calma da from→to (solo in avanti, salvo allowBack).
    */
-  async function travelProgress(fromIdx, toIdx, durationMs, gen) {
+  async function travelProgress(fromIdx, toIdx, durationMs, gen, { allowBack = false } = {}) {
     const a = Number(fromIdx);
     let b = Number(toIdx);
     if (!Number.isFinite(a)) return !interrupted(gen);
     if (!Number.isFinite(b)) b = a;
-    // Sempre avanti lungo il percorso; se to ≤ from, piccolo avanzamento
-    if (b <= a) b = a + 0.9;
-    const dur = Math.max(200, durationMs);
+    if (!allowBack) b = Math.max(a, b);
+
+    const span = Math.abs(b - a);
+    // Durata minima proporzionale alla distanza sul path → niente scatti
+    const dur = Math.max(durationMs, 320 + span * 22);
     const t0 = performance.now();
     onProgress?.(a);
     while (!interrupted(gen)) {
       const u = Math.min(1, (performance.now() - t0) / dur);
-      // Ease leggero in/out per fluidità, senza fermarsi
       const e = u * u * (3 - 2 * u);
       onProgress?.(a + (b - a) * e);
       if (u >= 1) break;
@@ -324,34 +324,40 @@ export function createAutoplayController(opts) {
     }
     if (!interrupted(gen)) {
       onProgress?.(b);
-      pathCursor = b;
+      pathCursor = Math.max(pathCursor, b);
     }
     return !interrupted(gen);
   }
 
+  /**
+   * Range pallino per la slide: solo avanzamento in avanti.
+   * Se il media è “dietro” sul GPX, il pallino non torna indietro —
+   * avanza verso il prossimo punto utile / un pezzo di path.
+   */
   function travelRangeFor(list, index) {
     const asset = list[index];
     const next = list[(index + 1) % list.length];
     const pathEnd = maxTrackIndex(list);
-    const rawFrom = trackIndexOf(asset, 0);
-    // Nuovo giro (pathCursor azzerato): riparti dal track del primo media
-    const from =
-      index === 0 && pathCursor < 1
-        ? Math.max(0, rawFrom)
-        : Math.max(pathCursor, rawFrom);
-    let to = trackIndexOf(next, from);
-    // Ultimo item: completa fino alla fine del GPX
+    const at = trackIndexOf(asset, pathCursor);
+    const nextAt = trackIndexOf(next, at);
+
+    const from = Math.max(0, Number.isFinite(pathCursor) ? pathCursor : 0);
+    let to;
+
     if (index >= list.length - 1) {
       to = Math.max(from, pathEnd);
-    } else if (to + 5 < from) {
-      to = Math.max(from, pathEnd);
+    } else if (at > from + 0.2) {
+      // Media davanti: vai con calma alla sua posizione
+      to = at;
+    } else if (nextAt > from + 0.2) {
+      // Media allo stesso punto o dietro: avanza verso il prossimo
+      to = from + Math.min(1.5, (nextAt - from) * 0.5);
+    } else {
+      to = from + 0.8;
     }
-    if (to <= from) {
-      // Più media sullo stesso punto GPX: avanza comunque un pezzo di path
-      const remainItems = Math.max(1, list.length - index);
-      const remainPath = Math.max(0.6, pathEnd - from);
-      to = from + remainPath / remainItems;
-    }
+
+    to = Math.max(from, to);
+    if (index < list.length - 1) to = Math.min(to, pathEnd);
     return { from, to };
   }
 
@@ -685,11 +691,13 @@ export function createAutoplayController(opts) {
       }
 
       const now = performance.now();
-      // Pallino: viaggio continuo lungo il path durante l’audio
+      // Pallino: solo avanti verso la posizione della slide
       if (Number.isFinite(fromIdx) && Number.isFinite(toIdx) && toIdx > fromIdx) {
-        const u = Math.min(1, (now - t0) / dwell);
+        const span = toIdx - fromIdx;
+        const moveDur = Math.max(dwell, 320 + span * 22);
+        const u = Math.min(1, (now - t0) / moveDur);
         const e = u * u * (3 - 2 * u);
-        onProgress?.(fromIdx + (toIdx - fromIdx) * e);
+        onProgress?.(fromIdx + span * e);
       }
       // ~28 sample/sec: scorrimento tipo memo
       if (now - lastPush >= 36) {
@@ -762,12 +770,12 @@ export function createAutoplayController(opts) {
 
     const gap = 16;
     const left = maxX + gap;
-    const top = minY;
     // Evita che esca dal viewport a destra
     const maxLeft = window.innerWidth - 12;
     return {
       left: Math.min(left, maxLeft),
-      top: Math.max(8, top),
+      // Slight optical nudge — CRT blur / font bearing sit below the CSS box top
+      top: Math.max(0, minY - 2),
     };
   }
 
@@ -851,7 +859,14 @@ export function createAutoplayController(opts) {
     seekIndex = null;
     pathCursor = 0;
 
-    await enterAutoplay(gen);
+    // Pallino subito all’inizio e già in salita calma durante l’ingresso
+    onProgress?.(0, { immediate: true });
+    const firstAt = trackIndexOf(list[0], 6);
+    const warmTo = Math.min(firstAt, Math.max(1.2, firstAt * 0.18));
+    await Promise.all([
+      enterAutoplay(gen),
+      travelProgress(0, warmTo, 1500, gen),
+    ]);
     if (aborting(gen)) return;
 
     let i = 0;

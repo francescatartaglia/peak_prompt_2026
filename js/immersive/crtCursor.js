@@ -14,6 +14,8 @@ export function createCrtCursor({
   isMediaHotEnabled,
   /** When false, cursor stays square (no diamond) — e.g. during intro zoom. */
   isHotEnabled,
+  /** Extra hot hit-test (e.g. GPX path line in autoplay). */
+  isExtraHot,
 } = {}) {
   if (typeof window === "undefined") return { dispose() {}, reset() {}, setHot() {} };
   if (!window.matchMedia("(pointer: fine)").matches) {
@@ -49,7 +51,13 @@ export function createCrtCursor({
 
   function hitDomHot(x, y) {
     const t = document.elementFromPoint(x, y);
-    return !!(t && t.closest && t.closest(HOT));
+    if (!t?.closest) return false;
+    const hot = t.closest(HOT);
+    if (!hot) return false;
+    // Zone slider locked in autoplay — no diamond
+    if (hot.closest(".hud-zone-slider.is-locked")) return false;
+    if (hot.disabled || hot.getAttribute("aria-disabled") === "true") return false;
+    return true;
   }
 
   function overHud(x, y) {
@@ -72,7 +80,7 @@ export function createCrtCursor({
 
   function hitHot(x, y) {
     if (isHotEnabled && !isHotEnabled()) return false;
-    return hitDomHot(x, y) || hitMediaHot(x, y);
+    return hitDomHot(x, y) || hitMediaHot(x, y) || !!isExtraHot?.(x, y);
   }
 
   function onMove(e) {

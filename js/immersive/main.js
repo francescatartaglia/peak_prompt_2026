@@ -76,10 +76,16 @@ async function boot() {
     // Gate: diamond on ACCESS OK. Intro zoom after click: square only.
     isHotEnabled: () => {
       if (!state.started) return true;
-      return state.navReady && !state.introTween;
+      // No diamond during intro zoom-in (or until orbit nav is ready)
+      if (state.introTween || document.body.classList.contains("is-intro-zooming")) {
+        return false;
+      }
+      return state.navReady;
     },
     isMediaHotEnabled: () =>
       state.started && state.navReady && !state.autoplayOn && !state.isInspectingMedia,
+    // Autoplay: rombo solo sulla linea GPX (non su tutta la mappa)
+    isExtraHot: (x, y) => !!state.hud?.isTrackPathHot?.(x, y),
   });
   bindStartGate();
 
@@ -244,7 +250,7 @@ async function boot() {
         );
       },
       onZone: (zoneId) => applyZoneForAutoplay(zoneId),
-      onProgress: (idx) => state.hud?.setTrackProgress(idx),
+      onProgress: (idx, opts) => state.hud?.setTrackProgress(idx, opts),
       onCaption: (lines) => {
         if (!captionEl) return;
         if (!lines) {
@@ -769,12 +775,17 @@ function playIntroZoom() {
   const finishNav = () => {
     camera.position.copy(to);
     camera.lookAt(0, 0, 0);
+    document.body.classList.remove("is-intro-zooming");
     enableOrbitNav();
     state.introTween = null;
     state.cursor?.reset?.();
   };
 
   const runZoom = () => {
+    // Solo durante lo zoom verso il centro: HUD off + niente rombo
+    document.body.classList.add("is-intro-zooming");
+    state.cursor?.reset?.();
+
     if (typeof gsap === "undefined") {
       finishNav();
       return;

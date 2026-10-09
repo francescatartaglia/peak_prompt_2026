@@ -251,8 +251,9 @@ export function createFocusController({
     const geo = focused.geometry;
     const w0 = geo?.userData?.width || focused.userData.baseW || 2.2;
     const h0 = geo?.userData?.height || focused.userData.baseH || 2.2;
-    const hw = w0 * 0.5 * focused.scale.x;
-    const hh = h0 * 0.5 * focused.scale.y;
+    // Local corners at scale 1 — mesh.scale is applied via matrixWorld (same as autoplay)
+    const hw = w0 * 0.5;
+    const hh = h0 * 0.5;
 
     const locals = [
       [-hw, hh, 0],
@@ -277,7 +278,8 @@ export function createFocusController({
 
     return {
       left: Math.min(maxX + 16, window.innerWidth - 12),
-      top: Math.max(8, minY),
+      // Same optical nudge as autoplay — CRT blur / font bearing
+      top: Math.max(0, minY - 2),
     };
   }
 

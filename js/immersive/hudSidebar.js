@@ -171,8 +171,10 @@ export function createHudSidebar(
   let scrubTarget = 0;
   let progressRaf = 0;
   let lastProgressTs = 0;
-  const SEEK_PER_SEC = 58;
-  const FOLLOW_SMOOTH = 11;
+  const SEEK_PER_SEC = 42;
+  const FOLLOW_SMOOTH = 7;
+  /** Cap speed along path in follow mode (indices/sec) — avoids dash-to-end */
+  const FOLLOW_MAX_PER_SEC = 14;
 
   root.innerHTML = `
     <aside class="hud" aria-label="Cardiac CT diagnostics">
@@ -379,7 +381,8 @@ export function createHudSidebar(
       const p = samplePath(progressPos);
       if (p) {
         const s = toScreen(p, layout);
-        const dotAccent = zoneConfig(p.zone || zone).accent;
+        // Colore = zona del media corrente (HUD zone), non del punto GPX
+        const dotAccent = zoneConfig(zone).accent;
         ctx.fillStyle = "#ffffff";
         ctx.shadowColor = dotAccent;
         ctx.shadowBlur = 10;
@@ -451,10 +454,14 @@ export function createHudSidebar(
         }
         dirty = true;
       } else if (progressMode === "follow") {
-        // Segue il viaggio continuo emesso dall’autoplay (path reale)
+        // Segue il viaggio continuo emesso dall’autoplay (path reale), con calma
         const prev = progressPos;
+        const delta = progressTarget - progressPos;
         const k = 1 - Math.exp(-dt * FOLLOW_SMOOTH);
-        progressPos += (progressTarget - progressPos) * k;
+        let step = delta * k;
+        const maxStep = FOLLOW_MAX_PER_SEC * dt;
+        if (Math.abs(step) > maxStep) step = Math.sign(step) * maxStep;
+        progressPos += step;
         progressPos = Math.min(n - 1, Math.max(0, progressPos));
         dirty = Math.abs(progressPos - prev) > 0.0004;
       }
@@ -509,6 +516,61 @@ export function createHudSidebar(
     return best;
   }
 
+  function dist2PointSeg(px, py, ax, ay, bx, by) {
+    const abx = bx - ax;
+    const aby = by - ay;
+    const apx = px - ax;
+    const apy = py - ay;
+    const ab2 = abx * abx + aby * aby || 1e-6;
+    let t = (apx * abx + apy * aby) / ab2;
+    t = Math.min(1, Math.max(0, t));
+    const cx = ax + abx * t;
+    const cy = ay + aby * t;
+    const dx = px - cx;
+    const dy = py - cy;
+    return dx * dx + dy * dy;
+  }
+
+  /** Rombo solo sulla linea del percorso (o sul pallino), non su tutta la mappa. */
+  function isTrackPathHot(clientX, clientY) {
+    if (!autoplay || !canvas || pts.length < 2) return false;
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    if (
+      clientX < rect.left ||
+      clientX > rect.right ||
+      clientY < rect.top ||
+      clientY > rect.bottom
+    ) {
+      return false;
+    }
+    const layout = currentLayout(rect.width, rect.height);
+    const sx = clientX - rect.left;
+    const sy = clientY - rect.top;
+    const thresh = 11;
+    const thresh2 = thresh * thresh;
+
+    let best = Infinity;
+    for (let i = 0; i < pts.length - 1; i += 1) {
+      const a = toScreen(pts[i], layout);
+      const b = toScreen(pts[i + 1], layout);
+      best = Math.min(best, dist2PointSeg(sx, sy, a.x, a.y, b.x, b.y));
+      if (best <= thresh2) return true;
+    }
+
+    // Pallino progresso
+    if (progressPos >= 0) {
+      const p = samplePath(progressPos);
+      if (p) {
+        const s = toScreen(p, layout);
+        const dx = sx - s.x;
+        const dy = sy - s.y;
+        if (dx * dx + dy * dy <= thresh2) return true;
+      }
+    }
+    return false;
+  }
+
   function paintZone() {
     const cfg = zoneConfig(zone);
     const t = ((zone - 1) / 3) * 100;
@@ -558,7 +620,14 @@ export function createHudSidebar(
       drawTrack();
       return;
     }
-    const idx = Math.min(n - 1, Math.max(0, Number(index)));
+    let idx = Math.min(n - 1, Math.max(0, Number(index)));
+    const userDriven = !!(opts.seek || opts.immediate || progressMode === "scrub");
+
+    // Autoplay: mai scatti indietro — solo scrub/seek utente possono tornare
+    if (!userDriven && progressPos >= 0 && idx < progressPos) {
+      return;
+    }
+
     progressTarget = idx;
 
     // Ricomparsa all’inizio / primo fix: snap
@@ -576,8 +645,6 @@ export function createHudSidebar(
       if (progressMode !== "seek" && progressMode !== "scrub") {
         progressMode = "follow";
       }
-      // Salto indietro netto (wrap / seek) → riallinea in modo fluido
-      if (idx < progressPos - 6) progressMode = "seek";
     }
 
     ensureProgressLoop();
@@ -647,6 +714,7 @@ export function createHudSidebar(
     getAutoplay: () => autoplay,
     setAutoplay,
     setTrackProgress,
+    isTrackPathHot,
     setSoundVolume: (v) => soundSlider.set(v, { silent: true }),
     setHeartVolume: (v) => heartSlider.set(v, { silent: true }),
     redrawTrack: drawTrack,

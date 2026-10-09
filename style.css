@@ -415,6 +415,11 @@ body.is-entered #c {
   transition: opacity 1.35s ease;
 }
 
+/* Intro zoom after ACCESS: HUD inert, no interaction */
+body.is-intro-zooming .hud {
+  pointer-events: none;
+}
+
 .hud {
   --hud-section-gap: 2.1rem; /* equal space: meta↔map and map↔BPM */
   pointer-events: auto;
@@ -978,7 +983,8 @@ body.is-entered #c {
   transition: opacity 0.2s ease;
   font-family: var(--font-ui);
   font-size: clamp(0.9rem, 1.35vw, 1.1rem);
-  line-height: 1.35;
+  /* line-height 1 → first glyph flush with media top (no half-leading) */
+  line-height: 1;
   letter-spacing: 0.04em;
   color: #ffffff;
   text-shadow: var(--crt-shadow);
@@ -988,6 +994,10 @@ body.is-entered #c {
   white-space: nowrap;
   text-align: left;
   max-width: min(40vw, 22rem);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.32em;
 }
 
 .autoplay-caption.is-on {
