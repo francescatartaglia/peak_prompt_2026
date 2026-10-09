@@ -12,6 +12,8 @@ export function createCrtCursor({
   getCamera,
   getMeshes,
   isMediaHotEnabled,
+  /** When false, cursor stays square (no diamond) — e.g. during intro zoom. */
+  isHotEnabled,
 } = {}) {
   if (typeof window === "undefined") return { dispose() {}, reset() {}, setHot() {} };
   if (!window.matchMedia("(pointer: fine)").matches) {
@@ -50,8 +52,15 @@ export function createCrtCursor({
     return !!(t && t.closest && t.closest(HOT));
   }
 
+  function overHud(x, y) {
+    const t = document.elementFromPoint(x, y);
+    return !!(t && t.closest && t.closest("#hud-root, .hud"));
+  }
+
   function hitMediaHot(x, y) {
     if (!isMediaHotEnabled?.()) return false;
+    // Don't let sphere media under the sidebar flip the cursor to diamond
+    if (overHud(x, y)) return false;
     const camera = getCamera?.();
     const meshes = (getMeshes?.() || []).filter((m) => m?.visible && !m.userData?.slideshowLock);
     if (!camera || !meshes.length) return false;
@@ -62,6 +71,7 @@ export function createCrtCursor({
   }
 
   function hitHot(x, y) {
+    if (isHotEnabled && !isHotEnabled()) return false;
     return hitDomHot(x, y) || hitMediaHot(x, y);
   }
 

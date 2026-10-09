@@ -416,13 +416,14 @@ body.is-entered #c {
 }
 
 .hud {
+  --hud-section-gap: 2.1rem; /* equal space: meta↔map and map↔BPM */
   pointer-events: auto;
   width: min(18.5rem, 42vw);
   height: 100vh;
   height: 100dvh;
   display: flex;
   flex-direction: column;
-  gap: 1.05rem;
+  gap: 0;
   /* Flush solid black on top / left / bottom; soft fade only on the right */
   padding: 0.85rem 0.75rem 0.85rem 0.75rem;
   margin: 0;
@@ -476,7 +477,7 @@ body.is-entered #c {
 }
 
 .hud-title {
-  font-size: 1.28rem;
+  font-size: 1.48rem;
   letter-spacing: 0.06em;
   line-height: 1.05;
   color: #f2f7fc;
@@ -502,6 +503,32 @@ body.is-entered #c {
   opacity: 0.88;
 }
 
+.hud-meta-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.65rem;
+  width: 100%;
+}
+
+.hud-meta-l {
+  flex: 1 1 0;
+  text-align: left;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hud-meta-r {
+  flex: 1 1 0;
+  text-align: right;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .hud-track-wrap {
   position: relative;
   flex: 0 1 46%;
@@ -514,6 +541,7 @@ body.is-entered #c {
   background: transparent;
   padding: 0;
   box-shadow: none;
+  margin-top: var(--hud-section-gap);
 }
 
 .hud-track-label {
@@ -553,8 +581,8 @@ body.is-entered #c {
 
 .hud-orient {
   position: absolute;
-  /* Sit over the canvas only (below ROUTE label) */
-  inset: 1.55rem 0.2rem 0.2rem;
+  /* Sit over the canvas only (below ROUTE label), inset from map border */
+  inset: 1.7rem 0.45rem 0.45rem;
   pointer-events: none;
   font-size: 1.05rem;
   color: rgba(200, 215, 230, 0.35);
@@ -593,7 +621,8 @@ body.is-entered #c {
   flex-direction: column;
   justify-content: flex-start;
   gap: 1.2rem;
-  padding-top: 0.2rem;
+  padding-top: 0;
+  margin-top: var(--hud-section-gap);
 }
 
 .hud-control {
@@ -616,8 +645,8 @@ body.is-entered #c {
 }
 
 .hud-readout {
-  font-size: 1.05rem;
-  letter-spacing: 0.04em;
+  font-size: 0.95rem;
+  letter-spacing: 0.1em;
   color: var(--hud-dim);
 }
 
@@ -772,34 +801,30 @@ body.is-entered #c {
 }
 
 .hud-autoplay {
-  margin-top: 0.2rem;
-  padding-top: 0.55rem;
+  /* Same gap as other controls (sound ↔ heartbeat) via .hud-controls gap */
+  margin-top: 0;
+  padding-top: 0;
 }
 
-.hud-autoplay-btn {
-  appearance: none;
-  width: 100%;
+.hud-autoplay-row {
   display: flex;
   align-items: center;
   gap: 0.45rem;
-  margin: 0;
+  width: 100%;
   padding: 0.25rem 0;
-  border: 0;
-  background: transparent;
   color: #f2f7fc;
   font-family: var(--font-ui);
-  font-size: 0.98rem;
+  font-size: 0.95rem;
   letter-spacing: 0.1em;
-  cursor: pointer;
-  text-shadow: var(--crt-shadow);
-  -webkit-font-smoothing: none;
-  text-rendering: optimizeSpeed;
+  /* Only the switch receives hits — label must not look like a button */
+  pointer-events: none;
 }
 
 .hud-autoplay-label {
   flex: 1 1 auto;
   text-align: left;
   color: #f2f7fc;
+  user-select: none;
   text-shadow: var(--crt-shadow);
   -webkit-font-smoothing: none;
   text-rendering: optimizeSpeed;
@@ -810,16 +835,24 @@ body.is-entered #c {
   color: var(--hud-dim);
   min-width: 1.6em;
   text-align: right;
+  font-size: 0.95rem;
+  letter-spacing: 0.1em;
+  user-select: none;
 }
 
 .hud-switch {
+  appearance: none;
   position: relative;
   flex: 0 0 auto;
   width: 28px;
   height: 14px;
+  padding: 0;
+  margin: 0;
   border-radius: 999px;
   border: 1px solid rgba(180, 190, 200, 0.28);
   background: #1a1a1a;
+  pointer-events: auto;
+  cursor: pointer;
   box-shadow:
     0 0 2.5px rgba(200, 210, 220, 0.18),
     0 0 5px rgba(160, 170, 180, 0.08),
@@ -837,6 +870,7 @@ body.is-entered #c {
   height: 10px;
   border-radius: 50%;
   background: #bdbdbd;
+  pointer-events: none;
   box-shadow:
     -0.4px 0 rgba(255, 72, 48, 0.25),
     0.4px 0 rgba(70, 190, 255, 0.2),
@@ -845,19 +879,16 @@ body.is-entered #c {
   transition: left 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
 }
 
-.hud-autoplay-btn.is-on {
+.hud-autoplay.is-on .hud-autoplay-label {
   color: #f2f7fc;
 }
 
-.hud-autoplay-btn.is-on .hud-autoplay-label {
-  color: #f2f7fc;
-}
-
-.hud-autoplay-btn.is-on .hud-autoplay-state {
+.hud-autoplay.is-on .hud-autoplay-state {
   color: var(--hud-dim);
 }
 
-.hud-autoplay-btn.is-on .hud-switch {
+.hud-switch.is-on,
+.hud-autoplay.is-on .hud-switch {
   background: color-mix(in srgb, var(--hud-accent) 35%, #111);
   border-color: color-mix(in srgb, var(--hud-accent) 70%, transparent);
   box-shadow:
@@ -866,7 +897,8 @@ body.is-entered #c {
     inset 0 0 4px rgba(0, 0, 0, 0.4);
 }
 
-.hud-autoplay-btn.is-on .hud-switch-thumb {
+.hud-switch.is-on .hud-switch-thumb,
+.hud-autoplay.is-on .hud-switch-thumb {
   left: 14px;
   background: var(--hud-accent);
   box-shadow:
@@ -920,9 +952,10 @@ body.is-entered #c {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: stretch;
   flex-wrap: nowrap;
   gap: 0.06rem;
+  margin-top: 1.05rem;
   font-size: 0.68rem;
   letter-spacing: 0.05em;
   color: var(--hud-dim);
@@ -970,7 +1003,6 @@ body.is-entered #c {
 }
 
 .hud-ww {
-  margin-left: 0;
   color: var(--hud-dim);
 }
 

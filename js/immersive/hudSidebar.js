@@ -40,7 +40,8 @@ function projectTrack(track) {
 
 /** Fit geo-normalized track into canvas without distorting aspect ratio. */
 function trackLayout(cssW, cssH, geoAspect) {
-  const pad = 0.07;
+  // Extra inset so the path stays clear of L / A / R / P labels
+  const pad = 0.14;
   const availW = Math.max(1, cssW * (1 - pad * 2));
   const availH = Math.max(1, cssH * (1 - pad * 2));
   const boxAspect = availW / availH;
@@ -153,15 +154,10 @@ export function createHudSidebar(
   const series = report.series || "3D CARDIAC RECON";
   const patientId = report.patientId || "HK-8842";
   const scanDate = report.scanDate || "02 OCT 2026";
-  const bpmMin = Number.isFinite(Number(report.bpmMin)) ? Math.round(Number(report.bpmMin)) : 87;
-  const bpmMax = Number.isFinite(Number(report.bpmMax)) ? Math.round(Number(report.bpmMax)) : 184;
   const kv = report.kv ?? 120;
   const ma = report.ma ?? 400;
-  const hikeType = report.hikeType || "TREKKING";
-  const location = report.location || "FALZAREGO · LAGAZUOI";
-  const endBpm = Number.isFinite(Number(report.endBpm))
-    ? Math.round(Number(report.endBpm))
-    : 111;
+  const slice = report.slice || "0.625MM";
+  const rot = report.rot || "0.35S";
   const duration = report.duration || "02:32:59";
   const distance = report.distance || "3.31 KM";
   const pts = projectTrack(track);
@@ -184,11 +180,14 @@ export function createHudSidebar(
         <div class="hud-title">${title}</div>
         <div class="hud-sub">CARDIAC CT · DICOM</div>
         <div class="hud-meta">
-          <span>EXAM ID: ${examId}</span>
-          <span>SERIES: ${series}</span>
-          <span>PATIENT ID: ${patientId}</span>
-          <span>SCAN DATE: ${scanDate}</span>
-          <span>LOCATION: ${location}</span>
+          <div class="hud-meta-row">
+            <span class="hud-meta-l">EXAM ID: ${examId}</span>
+            <span class="hud-meta-r">PATIENT ID: ${patientId}</span>
+          </div>
+          <div class="hud-meta-row">
+            <span class="hud-meta-l">SERIES: ${series}</span>
+            <span class="hud-meta-r">SCAN DATE: ${scanDate}</span>
+          </div>
         </div>
       </header>
 
@@ -242,21 +241,31 @@ export function createHudSidebar(
         </div>
 
         <div class="hud-control hud-autoplay">
-          <button type="button" class="hud-autoplay-btn" data-autoplay aria-pressed="false" aria-label="Autoplay off">
+          <div class="hud-autoplay-row">
             <span class="hud-autoplay-label">AUTOPLAY</span>
             <span class="hud-autoplay-state" data-autoplay-state>OFF</span>
-            <span class="hud-switch" aria-hidden="true">
-              <span class="hud-switch-thumb"></span>
-            </span>
-          </button>
+            <button
+              type="button"
+              class="hud-switch"
+              data-autoplay
+              aria-pressed="false"
+              aria-label="Autoplay off"
+            >
+              <span class="hud-switch-thumb" aria-hidden="true"></span>
+            </button>
+          </div>
         </div>
       </section>
 
       <footer class="hud-foot">
-        <span>BPM ${bpmMin}-${bpmMax}</span>
-        <span>PEAK PULSE ${endBpm} BPM</span>
-        <span>kV ${kv} / mA ${ma}</span>
-        <span class="hud-ww">${hikeType} · ${duration} · ${distance}</span>
+        <div class="hud-meta-row">
+          <span class="hud-meta-l">DURATION: ${duration}</span>
+          <span class="hud-meta-r">kV ${kv} / mA ${ma}</span>
+        </div>
+        <div class="hud-meta-row">
+          <span class="hud-meta-l">DISTANCE: ${distance}</span>
+          <span class="hud-meta-r">${slice} / ${rot}</span>
+        </div>
       </footer>
     </aside>
   `;
@@ -268,6 +277,7 @@ export function createHudSidebar(
   const zoneFill = root.querySelector("[data-zone-fill]");
   const zoneRange = root.querySelector("[data-zone-range]");
   const autoplayBtn = root.querySelector("[data-autoplay]");
+  const autoplayRow = root.querySelector(".hud-autoplay");
   const autoplayState = root.querySelector("[data-autoplay-state]");
   const zoneSlider = root.querySelector("[data-zone-slider]");
 
@@ -463,6 +473,7 @@ export function createHudSidebar(
       autoplayBtn.setAttribute("aria-pressed", autoplay ? "true" : "false");
       autoplayBtn.setAttribute("aria-label", autoplay ? "Autoplay on" : "Autoplay off");
     }
+    if (autoplayRow) autoplayRow.classList.toggle("is-on", autoplay);
     if (autoplayState) autoplayState.textContent = autoplay ? "ON" : "OFF";
     root.classList.toggle("is-autoplay", autoplay);
     if (zoneSlider) zoneSlider.classList.toggle("is-locked", autoplay);

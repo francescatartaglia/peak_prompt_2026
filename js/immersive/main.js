@@ -69,6 +69,11 @@ async function boot() {
   state.cursor = createCrtCursor({
     getCamera: () => state.camera,
     getMeshes: () => state.sphere?.activeMeshes || [],
+    // Gate: diamond on ACCESS OK. Intro zoom after click: square only.
+    isHotEnabled: () => {
+      if (!state.started) return true;
+      return state.navReady && !state.introTween;
+    },
     isMediaHotEnabled: () =>
       state.started && state.navReady && !state.autoplayOn && !state.isInspectingMedia,
   });
@@ -717,6 +722,7 @@ function playIntroZoom() {
     camera.lookAt(0, 0, 0);
     enableOrbitNav();
     state.introTween = null;
+    state.cursor?.reset?.();
   };
 
   const runZoom = () => {
