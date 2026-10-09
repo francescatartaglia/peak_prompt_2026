@@ -420,6 +420,11 @@ body.is-intro-zooming .hud {
   pointer-events: none;
 }
 
+/* Da ACCESS a fine zoom: zona non cliccabile */
+body.is-intro-pending .hud-zone-slider {
+  pointer-events: none;
+}
+
 .hud {
   --hud-section-gap: 2.1rem; /* equal space: meta↔map and map↔BPM */
   pointer-events: auto;

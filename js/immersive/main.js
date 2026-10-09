@@ -124,6 +124,8 @@ async function boot() {
       },
       onZoneChange: (zone) => {
         if (state.autoplayOn) return;
+        // Blocca finché lo zoom intro dopo ACCESS non è finito
+        if (!state.navReady || state.introTween) return;
         transitionToZone(zone);
       },
       onSoundChange: (vol) => {
@@ -767,6 +769,9 @@ function playIntroZoom() {
   state.navReady = false;
   controls.enabled = false;
   frameWholeSphere(camera, controls, radius);
+  // Da ACCESS fino a fine zoom: niente cambio zona
+  document.body.classList.add("is-intro-pending");
+  state.hud?.setZoneLocked?.(true);
 
   const from = camera.position.clone();
   const to = from.clone().normalize().multiplyScalar(INTRO_CENTER_DIST);
@@ -776,6 +781,8 @@ function playIntroZoom() {
     camera.position.copy(to);
     camera.lookAt(0, 0, 0);
     document.body.classList.remove("is-intro-zooming");
+    document.body.classList.remove("is-intro-pending");
+    if (!state.autoplayOn) state.hud?.setZoneLocked?.(false);
     enableOrbitNav();
     state.introTween = null;
     state.cursor?.reset?.();
@@ -893,6 +900,7 @@ function applyZoneForAutoplay(zoneId) {
 /** Cambio zona: swap immagini + rotazione rapida (niente fade). */
 function transitionToZone(zoneId) {
   if (state.autoplayOn) return;
+  if (!state.navReady || state.introTween) return;
   if (zoneId === state.zone) return;
   if (state.isInspectingMedia) void state.mediaFocus?.unfocus();
 

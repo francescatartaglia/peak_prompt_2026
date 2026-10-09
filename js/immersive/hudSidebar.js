@@ -163,6 +163,8 @@ export function createHudSidebar(
   const pts = projectTrack(track);
   let zone = startZone;
   let autoplay = false;
+  /** True durante intro zoom / ACCESS → blocca cambio zona UI */
+  let zoneLocked = false;
   /** Posizione continua lungo il GPX (float indice); -1 = nascosto */
   let progressPos = -1;
   let progressTarget = -1;
@@ -483,8 +485,9 @@ export function createHudSidebar(
     if (autoplayRow) autoplayRow.classList.toggle("is-on", autoplay);
     if (autoplayState) autoplayState.textContent = autoplay ? "ON" : "OFF";
     root.classList.toggle("is-autoplay", autoplay);
-    if (zoneSlider) zoneSlider.classList.toggle("is-locked", autoplay);
-    if (zoneRange) zoneRange.disabled = autoplay;
+    const lockZone = autoplay || zoneLocked;
+    if (zoneSlider) zoneSlider.classList.toggle("is-locked", lockZone);
+    if (zoneRange) zoneRange.disabled = lockZone;
     if (canvas) {
       canvas.classList.toggle("is-scrubbable", autoplay);
       canvas.style.pointerEvents = autoplay ? "auto" : "none";
@@ -591,6 +594,11 @@ export function createHudSidebar(
     if (!silent) onZoneChange?.(zone);
   }
 
+  function setZoneLocked(next) {
+    zoneLocked = !!next;
+    paintAutoplay();
+  }
+
   function setAutoplay(next, { silent = false } = {}) {
     autoplay = !!next;
     paintAutoplay();
@@ -651,12 +659,12 @@ export function createHudSidebar(
   }
 
   zoneRange?.addEventListener("input", () => {
-    if (autoplay) return;
+    if (autoplay || zoneLocked) return;
     setZone(Number(zoneRange.value));
   });
   root.querySelectorAll(".hud-zone-mark").forEach((btn) => {
     btn.addEventListener("click", () => {
-      if (autoplay) return;
+      if (autoplay || zoneLocked) return;
       setZone(Number(btn.dataset.zone));
     });
   });
@@ -711,6 +719,7 @@ export function createHudSidebar(
   return {
     getZone: () => zone,
     setZone,
+    setZoneLocked,
     getAutoplay: () => autoplay,
     setAutoplay,
     setTrackProgress,
