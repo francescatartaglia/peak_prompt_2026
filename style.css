@@ -1452,7 +1452,7 @@ body.is-intro-pending .hud-zone-slider {
     display: none !important;
   }
 
-  /* Mobile: no phosphor / glow; light blur only when not Safari */
+  /* No CRT on mobile — any browser (text, buttons, sliders) */
   :root {
     --crt-shadow: none;
     --crt-filter: none;
@@ -1500,68 +1500,6 @@ body.is-intro-pending .hud-zone-slider {
     filter: none !important;
     box-shadow: none !important;
     text-shadow: none !important;
-  }
-
-  /* Non-Safari mobile: CRT at ~2/3 desktop strength */
-  html:not(.is-safari) {
-    --crt-shadow:
-      -0.43px 0 rgba(255, 72, 48, 0.21),
-      0.43px 0 rgba(70, 190, 255, 0.17),
-      0 0 0.6px rgba(220, 224, 228, 0.5),
-      0 0 1.6px rgba(190, 195, 200, 0.27),
-      0 0 3.3px rgba(160, 165, 170, 0.12);
-    --crt-filter: blur(0.25px) contrast(1.04) brightness(1.02);
-    --crt-widget-filter: blur(0.19px) contrast(1.027) brightness(1.013);
-    --crt-widget-glow:
-      -0.3px 0 rgba(255, 72, 48, 0.13),
-      0.3px 0 rgba(70, 190, 255, 0.11),
-      0 0 1.3px rgba(200, 210, 220, 0.12);
-    --gate-crt-shadow: var(--crt-shadow);
-    --gate-crt-filter: var(--crt-filter);
-  }
-
-  html:not(.is-safari) .crt-text,
-  html:not(.is-safari) .crt-text--soft,
-  html:not(.is-safari) .gate-title,
-  html:not(.is-safari) .gate-start,
-  html:not(.is-safari) .gate-corner,
-  html:not(.is-safari) .hud-label,
-  html:not(.is-safari) .hud-readout,
-  html:not(.is-safari) .hud-autoplay-label,
-  html:not(.is-safari) .hud-autoplay-state,
-  html:not(.is-safari) .hud-zone-range,
-  html:not(.is-safari) .autoplay-caption,
-  html:not(.is-safari) .autoplay-caption .text-morph,
-  html:not(.is-safari) .autoplay-caption > div {
-    text-shadow: var(--crt-shadow) !important;
-    filter: var(--crt-filter) !important;
-  }
-
-  html:not(.is-safari) .gate-start.is-in {
-    filter: var(--crt-filter) !important;
-    text-shadow:
-      -0.47px 0 rgba(255, 60, 40, 0.27),
-      0.47px 0 rgba(255, 140, 110, 0.15),
-      0 0 0.8px rgba(225, 29, 46, 0.47),
-      0 0 2.3px rgba(180, 20, 35, 0.3),
-      0 0 4.7px rgba(100, 10, 18, 0.19) !important;
-  }
-
-  html:not(.is-safari) .hud-switch,
-  html:not(.is-safari) .hud-h-slider,
-  html:not(.is-safari) .hud-zone-slider {
-    filter: var(--crt-widget-filter) !important;
-  }
-
-  html:not(.is-safari) .hud-switch,
-  html:not(.is-safari) .hud-h-slider::before,
-  html:not(.is-safari) .hud-h-fill,
-  html:not(.is-safari) .hud-h-thumb,
-  html:not(.is-safari) .hud-zone-slider::before,
-  html:not(.is-safari) .hud-zone-mark,
-  html:not(.is-safari) .hud-zone-slider input[type="range"]::-webkit-slider-thumb,
-  html:not(.is-safari) .hud-zone-slider input[type="range"]::-moz-range-thumb {
-    box-shadow: var(--crt-widget-glow) !important;
   }
 
   .gate-panel {
