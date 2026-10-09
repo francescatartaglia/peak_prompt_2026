@@ -8,6 +8,12 @@ import { bendGeometry, flattenGeometry } from "./sphere.js";
 import { SPHERE_RADIUS } from "./zones.js";
 import { setShaderOpacity } from "./mediaShader.js";
 import { mediaHoverLines } from "./mediaHover.js";
+import {
+  computeMediaFit,
+  layoutMediaCaption,
+  captionStackLiftWorld,
+  mediaFreeBandCenterShiftWorld,
+} from "./mediaFit.js";
 
 const CLICK_MAX_DIST = 7;
 const CLICK_MAX_MS = 450;
@@ -45,6 +51,7 @@ export function createFocusController({
   const pointer = new THREE.Vector2();
   const _fwd = new THREE.Vector3();
   const _up = new THREE.Vector3();
+  const _right = new THREE.Vector3();
   const _pos = new THREE.Vector3();
   const _mediaPos = new THREE.Vector3();
   const _outward = new THREE.Vector3();
@@ -114,11 +121,26 @@ export function createFocusController({
     return Math.max(1, getSphereRadius?.() || SPHERE_RADIUS || 56);
   }
 
-  function framePose() {
+  function framePose(mesh) {
     camera.updateMatrixWorld(true);
     camera.getWorldDirection(_fwd);
+    _up.set(0, 1, 0).applyQuaternion(camera.quaternion);
+    _right.set(1, 0, 0).applyQuaternion(camera.quaternion);
     // Dead-center on optical axis (view offset handles free-band centering)
     _pos.copy(camera.position).addScaledVector(_fwd, FRAME_DIST);
+
+    if (mesh) {
+      const fit = computeMediaFit(mesh, camera, {
+        frameDist: FRAME_DIST,
+        maxDesiredH: DESIRED_H,
+      });
+      const lift = captionStackLiftWorld(camera, FRAME_DIST, fit.captionLiftPx || 0);
+      if (lift > 0) _pos.addScaledVector(_up, lift);
+      // Below: true horizontal center of free band
+      const xShift = mediaFreeBandCenterShiftWorld(camera, FRAME_DIST, fit.layout);
+      if (xShift) _pos.addScaledVector(_right, xShift);
+    }
+
     return {
       position: _pos.clone(),
       quaternion: camera.quaternion.clone(),
@@ -126,8 +148,11 @@ export function createFocusController({
   }
 
   function flatScale(mesh) {
-    const baseH = mesh?.userData?.baseH || 2.2;
-    return DESIRED_H / Math.max(baseH, 0.05);
+    const fit = computeMediaFit(mesh, camera, {
+      frameDist: FRAME_DIST,
+      maxDesiredH: DESIRED_H,
+    });
+    return fit.scale;
   }
 
   function captureCurved(mesh) {
@@ -245,42 +270,8 @@ export function createFocusController({
 
   function layoutCaption() {
     if (!focused || !isInspectingMedia) return null;
-    camera.updateMatrixWorld(true);
-    focused.updateMatrixWorld(true);
-
-    const geo = focused.geometry;
-    const w0 = geo?.userData?.width || focused.userData.baseW || 2.2;
-    const h0 = geo?.userData?.height || focused.userData.baseH || 2.2;
-    // Local corners at scale 1 — mesh.scale is applied via matrixWorld (same as autoplay)
-    const hw = w0 * 0.5;
-    const hh = h0 * 0.5;
-
-    const locals = [
-      [-hw, hh, 0],
-      [hw, hh, 0],
-      [-hw, -hh, 0],
-      [hw, -hh, 0],
-    ];
-
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minY = Infinity;
-    for (const [lx, ly, lz] of locals) {
-      _v.set(lx, ly, lz).applyMatrix4(focused.matrixWorld).project(camera);
-      if (_v.z < -1 || _v.z > 1) continue;
-      const sx = (_v.x * 0.5 + 0.5) * window.innerWidth;
-      const sy = (-_v.y * 0.5 + 0.5) * window.innerHeight;
-      minX = Math.min(minX, sx);
-      maxX = Math.max(maxX, sx);
-      minY = Math.min(minY, sy);
-    }
-    if (!Number.isFinite(minX) || !Number.isFinite(maxX)) return null;
-
-    return {
-      left: Math.min(maxX + 16, window.innerWidth - 12),
-      // Same optical nudge as autoplay — CRT blur / font bearing
-      top: Math.max(0, minY - 2),
-    };
+    const captionEl = document.getElementById("autoplay-caption");
+    return layoutMediaCaption(focused, camera, captionEl);
   }
 
   /** Inside park: photo centered in view and upright (mesh local +Y). */
@@ -456,7 +447,7 @@ export function createFocusController({
     mesh.userData.inspectFlat = true;
     mesh.geometry.computeVertexNormals();
     applyParkView(park);
-    const pose = framePose();
+    const pose = framePose(mesh);
     mesh.position.copy(pose.position);
     mesh.quaternion.copy(pose.quaternion);
     mesh.scale.setScalar(endScale);
@@ -464,7 +455,7 @@ export function createFocusController({
 
   function applyInspectMorph(mesh, park, mt, startScale, endScale, dimList) {
     applyParkView(park);
-    const pose = framePose();
+    const pose = framePose(mesh);
     mesh.position.lerpVectors(_startPos, pose.position, mt);
     _endQuat.copy(pose.quaternion);
     _tmpQuat.copy(_startQuat).slerp(_endQuat, mt);

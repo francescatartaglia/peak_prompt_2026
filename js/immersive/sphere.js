@@ -573,8 +573,8 @@ export function applyMediaOpacity(sphere, opacity) {
 export function applyHeartbeat(sphere, transportTime, bpm, { frozen = false } = {}) {
   if (!sphere) return 0;
   const { contraction } = contractionEnvelope(transportTime, bpm);
-  // Niente scale sul group (evita scatti dopo lo zoom): solo i pannelli pulsan
-  sphere.group.scale.setScalar(1);
+  // Fit desktop (sidebar) × pulse solo sui pannelli — non sul group oltre fitScale
+  sphere.group.scale.setScalar(sphere.fitScale ?? 1);
   const depth = (sphere.pulseDepth ?? 0.14) * 0.85;
   const pulse = frozen ? 1 : 1 - contraction * depth;
   for (const mesh of sphere.activeMeshes) {

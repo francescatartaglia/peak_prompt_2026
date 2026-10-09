@@ -36,6 +36,9 @@ export function createCrtCursor({
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
   let visible = false;
+  let hasPointer = false;
+  let lastX = 0;
+  let lastY = 0;
 
   function setPos(x, y) {
     el.style.transform = `translate(${x}px, ${y}px)`;
@@ -47,6 +50,12 @@ export function createCrtCursor({
 
   function reset() {
     setHot(false);
+  }
+
+  /** Re-test hot at last pointer (sphere spun under a still cursor). */
+  function tick() {
+    if (!hasPointer || !visible) return;
+    setHot(hitHot(lastX, lastY));
   }
 
   function hitDomHot(x, y) {
@@ -84,6 +93,9 @@ export function createCrtCursor({
   }
 
   function onMove(e) {
+    hasPointer = true;
+    lastX = e.clientX;
+    lastY = e.clientY;
     if (!visible) {
       visible = true;
       el.classList.add("is-on");
@@ -93,12 +105,16 @@ export function createCrtCursor({
   }
 
   function onDown(e) {
+    hasPointer = true;
+    lastX = e.clientX;
+    lastY = e.clientY;
     setPos(e.clientX, e.clientY);
     setHot(hitHot(e.clientX, e.clientY));
   }
 
   function onLeave() {
     visible = false;
+    hasPointer = false;
     el.classList.remove("is-on", "is-hot");
   }
 
@@ -109,6 +125,7 @@ export function createCrtCursor({
   return {
     setHot,
     reset,
+    tick,
     dispose() {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerdown", onDown);

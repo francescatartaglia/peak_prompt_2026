@@ -7,6 +7,12 @@ import * as THREE from "three";
 import { mediaHoverLines } from "./mediaHover.js";
 import { ZONE_ORDER, SPHERE_RADIUS } from "./zones.js";
 import { bendGeometry, flattenGeometry } from "./sphere.js";
+import {
+  computeMediaFit,
+  layoutMediaCaption,
+  captionStackLiftWorld,
+  mediaFreeBandCenterShiftWorld,
+} from "./mediaFit.js";
 
 const IMAGE_DWELL_MS = 3400;
 const VIDEO_DWELL_MS = 5400;
@@ -237,6 +243,7 @@ export function createAutoplayController(opts) {
 
   const _fwd = new THREE.Vector3();
   const _up = new THREE.Vector3();
+  const _right = new THREE.Vector3();
   const _pos = new THREE.Vector3();
   const _v = new THREE.Vector3();
 
@@ -428,11 +435,12 @@ export function createAutoplayController(opts) {
     }
   }
 
-  /** Piano 2D piatto: usa baseH (non la scala curva della sfera). */
+  /** Piano 2D piatto: scala per far entrare tutta l’immagine (+ dida) nel viewport. */
   function framePose(mesh) {
     camera.updateMatrixWorld(true);
     camera.getWorldDirection(_fwd);
     _up.set(0, 1, 0).applyQuaternion(camera.quaternion);
+    _right.set(1, 0, 0).applyQuaternion(camera.quaternion);
 
     const dist = 5.35;
     // Keep overview view-lift (no jump), but nudge media down so they
@@ -448,15 +456,21 @@ export function createAutoplayController(opts) {
       .addScaledVector(_fwd, dist)
       .addScaledVector(_up, -worldDown);
 
-    const baseH = mesh?.userData?.baseH || 2.2;
-    // Stessa scala a schermo di foto/video
-    const desiredH = 2.15;
-    const scale = desiredH / Math.max(baseH, 0.05);
+    const fit = computeMediaFit(mesh, camera, {
+      frameDist: dist,
+      maxDesiredH: 2.15,
+    });
+
+    const stackLift = captionStackLiftWorld(camera, dist, fit.captionLiftPx || 0);
+    if (stackLift > 0) _pos.addScaledVector(_up, stackLift);
+    // Below: true horizontal center of free band
+    const xShift = mediaFreeBandCenterShiftWorld(camera, dist, fit.layout);
+    if (xShift) _pos.addScaledVector(_right, xShift);
 
     return {
       position: _pos.clone(),
       quaternion: camera.quaternion.clone(),
-      scale,
+      scale: fit.scale,
     };
   }
 
@@ -734,49 +748,11 @@ export function createAutoplayController(opts) {
     return ok;
   }
 
-  /** Caption a destra della foto, allineata al bordo alto. */
+  /** Caption a destra se c’è spazio, altrimenti sotto allineata a sinistra. */
   function layoutCaption() {
     if (!currentMesh || !running) return null;
-    camera.updateMatrixWorld(true);
-    currentMesh.updateMatrixWorld(true);
-
-    const geo = currentMesh.geometry;
-    const w0 = geo?.userData?.width || currentMesh.userData.baseW || 2.2;
-    const h0 = geo?.userData?.height || currentMesh.userData.baseH || 2.2;
-    const hw = w0 * 0.5;
-    const hh = h0 * 0.5;
-
-    // Angoli del piano locale (foto piatta in slideshow)
-    const locals = [
-      [-hw, hh, 0],
-      [hw, hh, 0],
-      [-hw, -hh, 0],
-      [hw, -hh, 0],
-    ];
-
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minY = Infinity;
-    for (const [lx, ly, lz] of locals) {
-      _v.set(lx, ly, lz).applyMatrix4(currentMesh.matrixWorld).project(camera);
-      if (_v.z < -1 || _v.z > 1) continue;
-      const sx = (_v.x * 0.5 + 0.5) * window.innerWidth;
-      const sy = (-_v.y * 0.5 + 0.5) * window.innerHeight;
-      minX = Math.min(minX, sx);
-      maxX = Math.max(maxX, sx);
-      minY = Math.min(minY, sy);
-    }
-    if (!Number.isFinite(minX) || !Number.isFinite(maxX)) return null;
-
-    const gap = 16;
-    const left = maxX + gap;
-    // Evita che esca dal viewport a destra
-    const maxLeft = window.innerWidth - 12;
-    return {
-      left: Math.min(left, maxLeft),
-      // Slight optical nudge — CRT blur / font bearing sit below the CSS box top
-      top: Math.max(0, minY - 2),
-    };
+    const captionEl = document.getElementById("autoplay-caption");
+    return layoutMediaCaption(currentMesh, camera, captionEl);
   }
 
   async function showItem(asset, gen, { first = false, list = null, index = 0 } = {}) {

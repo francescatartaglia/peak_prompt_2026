@@ -16,8 +16,16 @@ const FADE_EPS = 0.992;
 /** Gap from HUD footer copy to the bottom of the viewport (px). */
 function measureHudBottomInset() {
   const foot = document.querySelector(".hud-foot");
-  if (!foot) return 14; // ≈ 0.85rem fallback
-  return Math.max(0, Math.round(window.innerHeight - foot.getBoundingClientRect().bottom));
+  if (!foot) return 14;
+  const cs = getComputedStyle(foot);
+  if (cs.display === "none" || cs.visibility === "hidden") {
+    // Mobile floating HUD — keep clear of home indicator / zone bar
+    return 28;
+  }
+  const gap = Math.round(window.innerHeight - foot.getBoundingClientRect().bottom);
+  // Guard against hidden/zero-size foot reporting full viewport
+  if (gap > window.innerHeight * 0.35) return 14;
+  return Math.max(0, gap);
 }
 
 /**

@@ -54,6 +54,8 @@ const state = {
   isInspectingMedia: false,
   /** Camera distance at full overview (max dezoom) */
   maxDezoomDist: 0,
+  /** Scale ≤1 so overview sphere fits in free band beside HUD */
+  sphereFitScale: 1,
   /** Risolto quando sfera + scena sono pronti */
   ready: null,
 };
@@ -84,8 +86,9 @@ async function boot() {
     },
     isMediaHotEnabled: () =>
       state.started && state.navReady && !state.autoplayOn && !state.isInspectingMedia,
-    // Autoplay: rombo solo sulla linea GPX (non su tutta la mappa)
-    isExtraHot: (x, y) => !!state.hud?.isTrackPathHot?.(x, y),
+    // Autoplay path + media-hover dida (also when sphere spins under a still cursor)
+    isExtraHot: (x, y) =>
+      !!state.hud?.isTrackPathHot?.(x, y) || !!state.mediaHover?.hovering,
   });
   bindStartGate();
 
@@ -96,6 +99,7 @@ async function boot() {
 
     const stats = state.data?.stats || {};
     const { min: bpmMin, max: bpmMax } = gateBpmRange(stats, state.data?.track || []);
+    syncViewportMode();
     state.hud = createHudSidebar(document.getElementById("hud-root"), {
       track: state.data.track || [],
       startZone: 1,
@@ -166,6 +170,7 @@ async function boot() {
       },
     });
     state.scene.add(state.sphere.group);
+    applySphereFitScale();
 
     const hoverRoot = document.getElementById("media-hover-root");
     if (hoverRoot) {
@@ -198,7 +203,8 @@ async function boot() {
       controls: state.controls,
       scene: state.scene,
       getMeshes: () => state.sphere?.activeMeshes || [],
-      getSphereRadius: () => state.sphere?.radius || SPHERE_RADIUS,
+      getSphereRadius: () =>
+        (state.sphere?.radius || SPHERE_RADIUS) * (state.sphereFitScale || 1),
       getSphereGroup: () => state.sphere?.group || null,
       isEnabled: () =>
         state.started && state.navReady && !state.autoplayOn && !state.mediaFocus?.animating,
@@ -559,8 +565,11 @@ function bindStartGate() {
     btn.blur();
     // Leave ACCESS diamond → square for exploration
     state.cursor?.reset?.();
-    // Wait a frame so HUD width is laid out, then shift optical center
-    requestAnimationFrame(() => updateCameraViewOffset());
+    // Wait a frame so HUD width is laid out, then shift optical center + fit sphere
+    requestAnimationFrame(() => {
+      updateCameraViewOffset();
+      applySphereFitScale();
+    });
 
     await ensureHeartbeat();
     resumeActiveVideos(state.sphere);
@@ -621,13 +630,15 @@ function setupThree(canvas) {
   state.ctScales = createCtScales(document.body, {
     getCamera: () => state.camera,
     getControls: () => state.controls,
-    getRadius: () => state.sphere?.radius || SPHERE_RADIUS,
+    getRadius: () =>
+      (state.sphere?.radius || SPHERE_RADIUS) * (state.sphereFitScale || 1),
     getMaxDezoomDist: () => state.maxDezoomDist || state.controls?.maxDistance || 0,
     isVisibleAllowed: () =>
       state.started &&
       !state.autoplayOn &&
       !state.isInspectingMedia &&
-      !state.introTween,
+      !state.introTween &&
+      !document.body.classList.contains("is-mobile"),
   });
 
   // Zoom subito dopo l’intro (senza dover cliccare prima la canvas)
@@ -668,15 +679,26 @@ function setupThree(canvas) {
   );
 
   window.addEventListener("resize", () => {
+    syncViewportMode();
     camera.aspect = window.innerWidth / window.innerHeight;
     renderer.setSize(window.innerWidth, window.innerHeight);
     updateCameraViewOffset();
+    applySphereFitScale();
   });
+  syncViewportMode();
+}
+
+/** Desktop vs mobile layout flag (≤768px). */
+function syncViewportMode() {
+  const mobile = window.matchMedia("(max-width: 768px)").matches;
+  document.body.classList.toggle("is-mobile", mobile);
+  return mobile;
 }
 
 /**
- * Optical center = midpoint of the free band beside the HUD (not screen center).
- * Overview: slight vertical lift. Inspect / autoplay: true vertical center.
+ * Optical center:
+ * - Desktop: midpoint of free band beside sidebar (+ slight overview lift)
+ * - Mobile / no sidebar: true screen center (clear view offset)
  */
 function updateCameraViewOffset() {
   const camera = state.camera;
@@ -684,9 +706,16 @@ function updateCameraViewOffset() {
   const w = window.innerWidth;
   const h = window.innerHeight;
   const entered = document.body.classList.contains("is-entered");
+  const mobile = document.body.classList.contains("is-mobile") || syncViewportMode();
   const hudEl = document.querySelector(".hud");
-  const hudW =
-    entered && hudEl ? Math.round(hudEl.getBoundingClientRect().width) : 0;
+
+  let hudW = 0;
+  if (entered && !mobile && hudEl) {
+    const cs = getComputedStyle(hudEl);
+    if (cs.display !== "none" && cs.visibility !== "hidden") {
+      hudW = Math.round(hudEl.getBoundingClientRect().width);
+    }
+  }
 
   if (hudW > 1) {
     // Inspect: drop lift → true vertical center. Autoplay: keep lift (no jump from overview).
@@ -696,6 +725,104 @@ function updateCameraViewOffset() {
     camera.clearViewOffset();
   }
   camera.updateProjectionMatrix();
+}
+
+/**
+ * Shrink sphere (≤1) so the full silhouette fits at max dezoom:
+ * - Desktop: free band right of sidebar
+ * - Mobile: inset from floating controls (no CT scales)
+ */
+function applySphereFitScale() {
+  const sphere = state.sphere;
+  const camera = state.camera;
+  const controls = state.controls;
+  if (!sphere?.group || !camera) return;
+
+  const mobile = document.body.classList.contains("is-mobile");
+  const entered = document.body.classList.contains("is-entered");
+
+  if (!entered) {
+    state.sphereFitScale = 1;
+    sphere.fitScale = 1;
+    sphere.group.scale.setScalar(1);
+    return;
+  }
+
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const hudEl = document.querySelector(".hud");
+  const hudW =
+    !mobile && hudEl ? Math.round(hudEl.getBoundingClientRect().width) : 0;
+
+  if (!mobile && hudW < 8) {
+    state.sphereFitScale = 1;
+    sphere.fitScale = 1;
+    sphere.group.scale.setScalar(1);
+    return;
+  }
+
+  const R = Math.max(1, sphere.radius || SPHERE_RADIUS);
+  const overviewDist = Math.max(
+    state.maxDezoomDist || 0,
+    controls?.maxDistance || 0,
+    frameDistance(R, camera, 1.45)
+  );
+
+  let ox;
+  let oy;
+  let leftBound;
+  let rightBound;
+  let topBound;
+  let bottomBound;
+
+  if (mobile) {
+    // True screen center; silhouette must clear vertical volume panels
+    ox = w * 0.5;
+    oy = h * 0.5;
+    const sound = document.querySelector(".hud-control--sound");
+    const heart = document.querySelector(".hud-control--heart");
+    const autoplay = document.querySelector(".hud-control--autoplay");
+    const zone = document.querySelector(".hud-control--zone");
+    const pad = 18;
+    const sr = sound?.getBoundingClientRect?.();
+    const hr = heart?.getBoundingClientRect?.();
+    const ar = autoplay?.getBoundingClientRect?.();
+    const zr = zone?.getBoundingClientRect?.();
+    leftBound = sr && sr.width > 1 ? Math.round(sr.right + pad) : 80;
+    rightBound = hr && hr.width > 1 ? Math.round(hr.left - pad) : w - 80;
+    topBound = ar && ar.height > 1 ? Math.round(ar.bottom + pad) : 56;
+    bottomBound = zr && zr.height > 1 ? Math.round(zr.top - pad) : h - 96;
+  } else {
+    // Optical center on screen (matches setViewOffset -hudW*0.40 + lift)
+    const liftY = state.isInspectingMedia ? 0 : Math.round(h * 0.028);
+    ox = w * 0.5 + hudW * 0.4;
+    oy = h * 0.5 - liftY;
+    const margin = 18;
+    leftBound = hudW + margin;
+    rightBound = w - margin;
+    topBound = margin;
+    bottomBound = h - margin;
+  }
+
+  const maxRadiusPx = Math.max(
+    24,
+    Math.min(ox - leftBound, rightBound - ox, oy - topBound, bottomBound - oy)
+  );
+  const maxDiamPx = Math.max(48, maxRadiusPx * 2);
+
+  // Natural silhouette diameter at overview (scale 1)
+  const vFov = THREE.MathUtils.degToRad(camera.fov);
+  const halfAng = Math.asin(Math.min(0.999, R / Math.max(R * 1.001, overviewDist)));
+  const naturalDiam = (2 * halfAng / vFov) * h;
+
+  // Mobile: never floor-up (that clipped under side sliders); slight safety margin
+  const raw = maxDiamPx / Math.max(naturalDiam, 1);
+  const fit = mobile
+    ? THREE.MathUtils.clamp(raw * 0.9, 0.12, 1)
+    : THREE.MathUtils.clamp(raw, 0.42, 1);
+  state.sphereFitScale = fit;
+  sphere.fitScale = fit;
+  sphere.group.scale.setScalar(fit);
 }
 
 /** Posiziona la camera fuori dalla sfera in modo da vederla intera. */
@@ -716,7 +843,10 @@ function enableOrbitNav() {
   if (!controls || !camera) return;
 
   const R = SPHERE_RADIUS;
-  const maxDist = Math.max(R * 2.9, frameDistance(R, camera, 1.45));
+  const mobile = document.body.classList.contains("is-mobile");
+  // Mobile: pull back farther so silhouette clears side volume panels
+  const framePad = mobile ? 1.9 : 1.45;
+  const maxDist = Math.max(R * (mobile ? 3.75 : 2.9), frameDistance(R, camera, framePad));
 
   camera.up.set(0, 1, 0);
   controls.enabled = true;
@@ -730,6 +860,9 @@ function enableOrbitNav() {
   controls.update();
   state.navReady = true;
   updateCameraViewOffset();
+  applySphereFitScale();
+  // Remeasure after floating HUD panels lay out
+  requestAnimationFrame(() => applySphereFitScale());
 
   // Drop focus from ACCESS so wheel/drag work immediately
   try {
@@ -1034,8 +1167,12 @@ function animate() {
     state.camera.lookAt(state.controls.target);
   }
 
-  if (!state.autoplayOn && !inspecting) state.mediaHover?.tick?.();
-  else if (state.autoplayOn || inspecting) state.placeCaption?.();
+  if (!state.autoplayOn && !inspecting) {
+    state.mediaHover?.tick?.();
+    state.cursor?.tick?.();
+  } else if (state.autoplayOn || inspecting) {
+    state.placeCaption?.();
+  }
 
   state.ctScales?.tick?.();
 

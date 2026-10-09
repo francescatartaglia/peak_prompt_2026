@@ -82,11 +82,39 @@ function bindHorizontalSlider(el, { value, onChange, valueEl } = {}) {
     null;
   let dragging = false;
 
+  function isVertical() {
+    if (!el) return false;
+    if (el.classList.contains("is-vertical")) return true;
+    const rect = el.getBoundingClientRect();
+    return rect.height > rect.width * 1.15;
+  }
+
   function paint() {
     const pct = `${(v * 100).toFixed(1)}%`;
     el.style.setProperty("--pct", pct);
-    if (fill) fill.style.width = pct;
-    if (thumb) thumb.style.left = pct;
+    const vert = isVertical();
+    if (fill) {
+      if (vert) {
+        fill.style.width = "";
+        fill.style.height = pct;
+      } else {
+        fill.style.height = "";
+        fill.style.width = pct;
+      }
+    }
+    if (thumb) {
+      if (vert) {
+        thumb.style.left = "50%";
+        thumb.style.bottom = pct;
+        thumb.style.top = "auto";
+        thumb.style.transform = "translate(-50%, 50%)";
+      } else {
+        thumb.style.bottom = "";
+        thumb.style.top = "";
+        thumb.style.left = pct;
+        thumb.style.transform = "";
+      }
+    }
     if (readout) {
       readout.textContent = String(Math.round(v * 100));
     }
@@ -98,8 +126,13 @@ function bindHorizontalSlider(el, { value, onChange, valueEl } = {}) {
     if (!silent) onChange?.(v);
   }
 
-  function fromX(clientX) {
+  function fromPointer(clientX, clientY) {
     const rect = el.getBoundingClientRect();
+    if (isVertical()) {
+      if (rect.height <= 0) return v;
+      // Bottom = 0, top = 1
+      return Math.min(1, Math.max(0, (rect.bottom - clientY) / rect.height));
+    }
     if (rect.width <= 0) return v;
     return Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
   }
@@ -109,12 +142,12 @@ function bindHorizontalSlider(el, { value, onChange, valueEl } = {}) {
     e.stopPropagation();
     dragging = true;
     el.setPointerCapture?.(e.pointerId);
-    set(fromX(e.clientX));
+    set(fromPointer(e.clientX, e.clientY));
   });
   el.addEventListener("pointermove", (e) => {
     if (!dragging) return;
     e.preventDefault();
-    set(fromX(e.clientX));
+    set(fromPointer(e.clientX, e.clientY));
   });
   el.addEventListener("pointerup", () => {
     dragging = false;
@@ -122,6 +155,8 @@ function bindHorizontalSlider(el, { value, onChange, valueEl } = {}) {
   el.addEventListener("pointercancel", () => {
     dragging = false;
   });
+
+  window.addEventListener("resize", () => paint());
 
   paint();
   return { get: () => v, set };
@@ -204,7 +239,7 @@ export function createHudSidebar(
       </section>
 
       <section class="hud-controls">
-        <div class="hud-control">
+        <div class="hud-control hud-control--zone">
           <div class="hud-control-row">
             <span class="hud-label">BPM / ZONE</span>
             <span class="hud-readout hud-readout--zone" data-zone-readout>ZONE 1</span>
@@ -222,7 +257,7 @@ export function createHudSidebar(
           <div class="hud-zone-range" data-zone-range-label>${zoneConfig(startZone).rangeLabel}</div>
         </div>
 
-        <div class="hud-control">
+        <div class="hud-control hud-control--sound">
           <div class="hud-control-row">
             <span class="hud-label">SOUND</span>
             <span class="hud-readout" data-value data-mode="pct">${Math.round(soundVol * 100)}</span>
@@ -233,7 +268,7 @@ export function createHudSidebar(
           </div>
         </div>
 
-        <div class="hud-control">
+        <div class="hud-control hud-control--heart">
           <div class="hud-control-row">
             <span class="hud-label">HEARTBEAT</span>
             <span class="hud-readout" data-value data-mode="pct">${Math.round(heartVol * 100)}</span>
@@ -244,7 +279,7 @@ export function createHudSidebar(
           </div>
         </div>
 
-        <div class="hud-control hud-autoplay">
+        <div class="hud-control hud-control--autoplay hud-autoplay">
           <div class="hud-autoplay-row">
             <span class="hud-autoplay-label">AUTOPLAY</span>
             <span class="hud-autoplay-state" data-autoplay-state>OFF</span>
@@ -703,18 +738,61 @@ export function createHudSidebar(
   canvas?.addEventListener("pointerup", endScrub);
   canvas?.addEventListener("pointercancel", endScrub);
 
-  const soundSlider = bindHorizontalSlider(root.querySelector("[data-sound-slider]"), {
+  const soundEl = root.querySelector("[data-sound-slider]");
+  const heartEl = root.querySelector("[data-heart-slider]");
+
+  function syncMobileSliderOrient() {
+    const mobile = window.matchMedia("(max-width: 768px)").matches;
+    soundEl?.classList.toggle("is-vertical", mobile);
+    heartEl?.classList.toggle("is-vertical", mobile);
+  }
+  syncMobileSliderOrient();
+
+  const soundSlider = bindHorizontalSlider(soundEl, {
     value: soundVol,
     onChange: onSoundChange,
   });
-  const heartSlider = bindHorizontalSlider(root.querySelector("[data-heart-slider]"), {
+  const heartSlider = bindHorizontalSlider(heartEl, {
     value: heartVol,
     onChange: onHeartChange,
   });
 
+  const hudEl = root.querySelector(".hud");
+
+  /**
+   * When viewport height is tight, CSS already compresses gaps via dvh clamps.
+   * If controls would still overflow (autoplay clipped), pack gaps further —
+   * map already flex-shrinks first; this only squeezes whitespace.
+   */
+  function syncHudPack() {
+    if (!hudEl) return;
+    const mobile = window.matchMedia("(max-width: 768px)").matches;
+    if (mobile) {
+      hudEl.style.removeProperty("--hud-pack");
+      return;
+    }
+    hudEl.style.setProperty("--hud-pack", "1");
+    // Force layout after reset
+    void hudEl.offsetHeight;
+    let pack = 1;
+    // Binary-ish step down until content fits or floor
+    while (hudEl.scrollHeight > hudEl.clientHeight + 1 && pack > 0.42) {
+      pack = Math.max(0.42, pack - 0.06);
+      hudEl.style.setProperty("--hud-pack", String(pack));
+      void hudEl.offsetHeight;
+    }
+  }
+
+  function onHudResize() {
+    syncMobileSliderOrient();
+    syncHudPack();
+    drawTrack();
+  }
+
   paintZone();
   paintAutoplay();
-  window.addEventListener("resize", drawTrack);
+  syncHudPack();
+  window.addEventListener("resize", onHudResize);
 
   return {
     getZone: () => zone,
@@ -729,7 +807,7 @@ export function createHudSidebar(
     redrawTrack: drawTrack,
     dispose() {
       stopProgressLoop();
-      window.removeEventListener("resize", drawTrack);
+      window.removeEventListener("resize", onHudResize);
     },
   };
 }
