@@ -1,12 +1,27 @@
 /**
  * Procedural heartbeat — stesso timbro in tutte le zone;
  * il volume è regolabile dall’utente.
+ *
+ * Shared AudioContext so autoplay clips don’t spawn a 2nd context
+ * (mobile Safari often mutes the first when a second starts).
  */
 
 import { DUB_RATIO, clampBpm, secondsPerBeat } from "./heartbeat.js";
 
 /** Timbro fisso (non cambia con la zona). */
 const TONE = { bass: 0.45, drive: 0.12, body: 0.55 };
+
+let sharedCtx = null;
+
+/** One AudioContext for heartbeat + autoplay analysers. */
+export function getSharedAudioContext() {
+  if (!sharedCtx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    sharedCtx = new AC();
+  }
+  return sharedCtx;
+}
 
 export function createHeartbeatAudio() {
   let ctx = null;
@@ -56,10 +71,7 @@ export function createHeartbeatAudio() {
   }
 
   function ensureCtx() {
-    if (!ctx) {
-      const AC = window.AudioContext || window.webkitAudioContext;
-      ctx = new AC();
-    }
+    ctx = getSharedAudioContext();
     return ctx;
   }
 
@@ -135,6 +147,7 @@ export function createHeartbeatAudio() {
   return {
     async start(visualElapsed = 0) {
       const ac = ensureGraph();
+      if (!ac) return;
       if (ac.state === "suspended") await ac.resume();
       visualOffset = ac.currentTime - visualElapsed;
       const spb = secondsPerBeat(bpm);
@@ -144,6 +157,19 @@ export function createHeartbeatAudio() {
       applyVolume();
       if (timer) window.clearTimeout(timer);
       tick();
+    },
+    /** Keep beating after another gesture / clip (iOS often suspends the ctx). */
+    async resume() {
+      const ac = ensureCtx();
+      if (!ac) return;
+      if (ac.state === "suspended") {
+        try {
+          await ac.resume();
+        } catch {
+          /* ignore */
+        }
+      }
+      if (enabled && !timer) tick();
     },
     stop() {
       enabled = false;

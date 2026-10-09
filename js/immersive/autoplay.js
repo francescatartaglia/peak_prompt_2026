@@ -13,6 +13,7 @@ import {
   captionStackLiftWorld,
   mediaFreeBandCenterShiftWorld,
 } from "./mediaFit.js";
+import { getSharedAudioContext } from "./audio.js";
 
 const IMAGE_DWELL_MS = 3400;
 const VIDEO_DWELL_MS = 5400;
@@ -424,15 +425,8 @@ export function createAutoplayController(opts) {
     }
     activeClip = null;
     activeGain = null;
-    if (activeAudioCtx) {
-      const ctx = activeAudioCtx;
-      activeAudioCtx = null;
-      try {
-        ctx.close();
-      } catch {
-        /* ignore */
-      }
-    }
+    // Shared with heartbeat — never close
+    activeAudioCtx = null;
   }
 
   /** Piano 2D piatto: scala per far entrare tutta l’immagine (+ dida) nel viewport. */
@@ -642,7 +636,6 @@ export function createAutoplayController(opts) {
   async function playAudioSlide(asset, gen, mesh, travel = null) {
     stopClip();
 
-    const AC = window.AudioContext || window.webkitAudioContext;
     const el = new Audio(encodeMediaPath(asset.path));
     el.preload = "auto";
     el.crossOrigin = "anonymous";
@@ -655,10 +648,11 @@ export function createAutoplayController(opts) {
       mesh.userData.liveHistory || new Float32Array(LIVE_BARS).fill(0.04);
     mesh.userData.liveHistory = history;
 
-    if (AC) {
-      try {
-        const ac = new AC();
-        activeAudioCtx = ac;
+    // Reuse heartbeat AudioContext — a 2nd ctx mutes the beat on mobile Safari
+    try {
+      const ac = getSharedAudioContext();
+      activeAudioCtx = ac;
+      if (ac) {
         if (ac.state === "suspended") await ac.resume();
         const src = ac.createMediaElementSource(el);
         analyser = ac.createAnalyser();
@@ -671,12 +665,13 @@ export function createAutoplayController(opts) {
         analyser.connect(gain);
         gain.connect(ac.destination);
         timeData = new Uint8Array(analyser.fftSize);
-      } catch (err) {
-        console.warn("[autoplay] live analyser failed", err);
-        activeGain = null;
+      } else {
         el.volume = clipGainFromSlider(getSoundVolume?.() ?? 0.5);
       }
-    } else {
+    } catch (err) {
+      console.warn("[autoplay] live analyser failed", err);
+      activeGain = null;
+      activeAudioCtx = null;
       el.volume = clipGainFromSlider(getSoundVolume?.() ?? 0.5);
     }
 

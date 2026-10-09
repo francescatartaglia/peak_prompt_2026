@@ -1379,15 +1379,54 @@ body.is-intro-pending .hud-zone-slider {
     display: none !important;
   }
 
-  .gate-title {
-    white-space: normal;
-    text-wrap: balance;
-    width: min(92vw, max-content);
+  /* No CRT soft-blur / phosphor shadow on mobile type */
+  .crt-text,
+  .crt-text--soft,
+  .gate-title,
+  .gate-start,
+  .gate-start.is-in,
+  .gate-corner,
+  .hud-title,
+  .hud-sub,
+  .hud-meta,
+  .hud-track-label,
+  .hud-label,
+  .hud-readout,
+  .hud-foot,
+  .hud-orient,
+  .hud-autoplay-btn,
+  .hud-autoplay-label,
+  .hud-autoplay-state,
+  .hud-zone-range,
+  .autoplay-caption,
+  .autoplay-caption .text-morph,
+  .autoplay-caption > div,
+  .media-hover,
+  .media-hover [data-line] {
+    text-shadow: none !important;
+    filter: none !important;
   }
 
   .gate-panel {
-    width: min(92vw, max-content);
-    gap: 1rem;
+    width: 96vw;
+    max-width: 96vw;
+    gap: 1.15rem;
+    padding: 0 2vw;
+  }
+
+  .gate-title {
+    white-space: normal;
+    text-wrap: balance;
+    width: 96vw;
+    max-width: 96vw;
+    font-size: clamp(1.9rem, 10.5vw, 3.4rem);
+    letter-spacing: 0.04em;
+    line-height: 1.08;
+  }
+
+  .gate-start {
+    font-size: clamp(1.4rem, 6.2vw, 1.95rem);
+    letter-spacing: 0.12em;
   }
 
   .gate-corner {
@@ -1400,6 +1439,11 @@ body.is-intro-pending .hud-zone-slider {
 
   .gate-corner [data-gate-line] {
     white-space: nowrap;
+  }
+
+  /* No hover metadata on phones */
+  .media-hover {
+    display: none !important;
   }
 
   /* Captions always below media — allow wrap, keep stack readable */

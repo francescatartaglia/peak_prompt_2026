@@ -182,7 +182,9 @@ async function boot() {
           state.started &&
           state.navReady &&
           !state.autoplayOn &&
-          !state.isInspectingMedia,
+          !state.isInspectingMedia &&
+          // Mobile: no hover dida — only on single-photo inspect / autoplay
+          !document.body.classList.contains("is-mobile"),
       });
     }
 
@@ -955,6 +957,12 @@ async function ensureHeartbeat() {
     } catch {
       /* retry on next gesture */
     }
+  } else {
+    try {
+      await state.audio.resume?.();
+    } catch {
+      /* ignore */
+    }
   }
 }
 
@@ -1098,6 +1106,8 @@ async function setAutoplay(on) {
     state.controls.enabled = false;
     // Fade ambient in parallelo all’ingresso slideshow
     void state.ambient.stop();
+    // Keep procedural heartbeat alive (mobile often suspends AudioContext)
+    void ensureHeartbeat();
     // Non await: altrimenti non si può spegnere il toggle durante lo slideshow
     void state.autoplay?.start();
   } else {
