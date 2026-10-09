@@ -208,7 +208,7 @@ function buildScale(axis) {
   svg.appendChild(g);
   root.appendChild(svg);
 
-  // Labels at major ticks + unit
+  // Labels at major ticks + unit (same gap: H after 320, V before 0)
   const labels = document.createElement("div");
   labels.className = "ct-scale__labels";
   for (let mm = 0; mm <= FOV_MM; mm += MAJOR_MM) {
@@ -216,21 +216,27 @@ function buildScale(axis) {
     span.className = "ct-scale__num";
     if (mm === 0) span.classList.add("is-min");
     if (mm === FOV_MM) span.classList.add("is-max");
-    // V: unit sits left of 0
-    span.textContent = !isH && mm === 0 ? "MM 0" : String(mm);
+
+    const unit = document.createElement("span");
+    unit.className = "ct-scale__unit";
+    unit.textContent = "MM";
+
+    if (!isH && mm === 0) {
+      // V: MM ←gap→ 0
+      span.append(unit, document.createTextNode(String(mm)));
+    } else if (isH && mm === FOV_MM) {
+      // H: 320 ←gap→ MM
+      span.append(document.createTextNode(String(mm)), unit);
+    } else {
+      span.textContent = String(mm);
+    }
+
     // H: 0→left; V: 0→bottom
     const t = isH ? mm / FOV_MM : 1 - mm / FOV_MM;
     span.style.setProperty("--t", String(t));
     labels.appendChild(span);
   }
-  if (isH) {
-    const unit = document.createElement("span");
-    unit.className = "ct-scale__unit";
-    unit.textContent = "MM";
-    root.append(labels, unit);
-  } else {
-    root.append(labels);
-  }
+  root.append(labels);
 
   return { root, svg };
 }

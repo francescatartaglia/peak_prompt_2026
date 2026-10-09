@@ -1069,8 +1069,7 @@ body.is-intro-pending .hud-zone-slider {
   pointer-events: none;
 }
 
-.ct-scale__num,
-.ct-scale__unit {
+.ct-scale__num {
   position: absolute;
   font-family: var(--font-ui);
   font-size: 0.72rem;
@@ -1080,6 +1079,17 @@ body.is-intro-pending .hud-zone-slider {
   text-shadow: var(--crt-shadow);
   -webkit-font-smoothing: none;
   text-rendering: optimizeSpeed;
+  white-space: nowrap;
+}
+
+/* Same gap: H → after 320; V → before 0 */
+.ct-scale__unit {
+  position: absolute;
+  top: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  text-shadow: inherit;
   white-space: nowrap;
 }
 
@@ -1097,9 +1107,9 @@ body.is-intro-pending .hud-zone-slider {
   transform: translateX(-100%);
 }
 
-.ct-scale--h .ct-scale__unit {
-  bottom: 30px;
-  right: -1.65rem;
+.ct-scale--h .ct-scale__num.is-max .ct-scale__unit {
+  left: 100%;
+  margin-left: 0.35rem;
 }
 
 /* Labels sit toward the sphere (left of inward ticks) */
@@ -1118,10 +1128,9 @@ body.is-intro-pending .hud-zone-slider {
   transform: translateY(-100%);
 }
 
-.ct-scale--v .ct-scale__unit {
-  right: calc(100% + 4px);
-  left: auto;
-  bottom: -1.05rem;
+.ct-scale--v .ct-scale__num.is-min .ct-scale__unit {
+  right: 100%;
+  margin-right: 0.35rem;
 }
 
 .media-hover-root {

@@ -2573,24 +2573,6 @@
       }
     },
     {
-      "id": "eco.m4a",
-      "path": "assets/media/audio/eco.m4a",
-      "source": "audio",
-      "kind": "audio",
-      "time": "2026-10-02T13:00:51Z",
-      "duration": 21.41733333333333,
-      "progress": 0.38132,
-      "onTrack": true,
-      "match": {
-        "time": "2026-10-02T13:02:10.905Z",
-        "lat": 46.528727,
-        "lon": 12.018286,
-        "ele": 2399.044,
-        "deltaSeconds": 79.9,
-        "index": 64
-      }
-    },
-    {
       "id": "eco risata.m4a",
       "path": "assets/media/audio/eco risata.m4a",
       "source": "audio",
