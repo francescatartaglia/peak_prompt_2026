@@ -17,9 +17,9 @@ export function createCrtCursor({
   /** Extra hot hit-test (e.g. GPX path line in autoplay). */
   isExtraHot,
 } = {}) {
-  if (typeof window === "undefined") return { dispose() {}, reset() {}, setHot() {} };
+  if (typeof window === "undefined") return { dispose() {}, reset() {}, setHot() {}, tick() {} };
   if (!window.matchMedia("(pointer: fine)").matches) {
-    return { dispose() {}, reset() {}, setHot() {} };
+    return { dispose() {}, reset() {}, setHot() {}, tick() {} };
   }
 
   const root = document.documentElement;

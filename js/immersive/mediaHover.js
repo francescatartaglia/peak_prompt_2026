@@ -126,8 +126,18 @@ export function createMediaHover(root, { camera, domElement, getMeshes, isEnable
     place(x, y);
   }
 
+  function overHud(x, y) {
+    const t = document.elementFromPoint(x, y);
+    return !!(t?.closest?.("#hud-root, .hud"));
+  }
+
   function pick(clientX, clientY) {
     if (!camera || (isEnabled && !isEnabled()) || dragging) {
+      hide();
+      return;
+    }
+    // No mouse-over dida while pointer is on the vertical menu
+    if (overHud(clientX, clientY)) {
       hide();
       return;
     }

@@ -9,13 +9,23 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
     <title>PEAK PROMPT · CARDIAC CT</title>
+    <script>
+      /* Safari WebKit: CRT filter/blur is unreliable — flag before paint */
+      (function () {
+        var ua = navigator.userAgent || "";
+        var isSafari =
+          /Safari/i.test(ua) &&
+          !/Chrome|Chromium|CriOS|Edg|EdgiOS|Firefox|FxiOS|OPR|Android/i.test(ua);
+        if (isSafari) document.documentElement.classList.add("is-safari");
+      })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=VT323&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="style.css?v=20261010r" />
+    <link rel="stylesheet" href="style.css?v=20261011f" />
     <script type="importmap">
       {
         "imports": {
@@ -78,6 +88,6 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
-    <script type="module" src="js/immersive/main.js?v=20261010r"></script>
+    <script type="module" src="js/immersive/main.js?v=20261011k"></script>
   </body>
 </html>
