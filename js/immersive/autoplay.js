@@ -429,7 +429,18 @@ export function createAutoplayController(opts) {
     _up.set(0, 1, 0).applyQuaternion(camera.quaternion);
 
     const dist = 5.35;
-    _pos.copy(camera.position).addScaledVector(_fwd, dist).addScaledVector(_up, 0.06);
+    // Keep overview view-lift (no jump), but nudge media down so they
+    // land on true vertical screen center — not the raised optical axis.
+    const liftY = camera.view?.enabled ? camera.view.offsetY || 0 : 0;
+    const h = Math.max(1, window.innerHeight);
+    const vFov = THREE.MathUtils.degToRad(camera.fov);
+    const worldDown =
+      liftY > 0 ? (2 * (liftY / h) * Math.tan(vFov * 0.5) * dist) : 0;
+
+    _pos
+      .copy(camera.position)
+      .addScaledVector(_fwd, dist)
+      .addScaledVector(_up, -worldDown);
 
     const baseH = mesh?.userData?.baseH || 2.2;
     // Stessa scala a schermo di foto/video

@@ -117,8 +117,8 @@ export function createFocusController({
   function framePose() {
     camera.updateMatrixWorld(true);
     camera.getWorldDirection(_fwd);
-    _up.set(0, 1, 0).applyQuaternion(camera.quaternion);
-    _pos.copy(camera.position).addScaledVector(_fwd, FRAME_DIST).addScaledVector(_up, 0.06);
+    // Dead-center on optical axis (view offset handles free-band centering)
+    _pos.copy(camera.position).addScaledVector(_fwd, FRAME_DIST);
     return {
       position: _pos.clone(),
       quaternion: camera.quaternion.clone(),

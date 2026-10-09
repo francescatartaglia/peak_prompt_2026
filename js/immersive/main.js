@@ -21,6 +21,7 @@ import { morphTextInPlace } from "./textMorph.js";
 import { createAutoplayController, buildChronoPlaylist } from "./autoplay.js";
 import { createCrtCursor } from "./crtCursor.js";
 import { createFocusController } from "./focus.js";
+import { createCtScales } from "./ctScales.js";
 
 const state = {
   data: null,
@@ -34,6 +35,7 @@ const state = {
   mediaFocus: null,
   cursor: null,
   autoplay: null,
+  ctScales: null,
   ambient: createZoneAmbient(),
   fluid: null,
   audio: createHeartbeatAudio(),
@@ -50,6 +52,8 @@ const state = {
   autoplayOn: false,
   /** Media inspection / focus mode */
   isInspectingMedia: false,
+  /** Camera distance at full overview (max dezoom) */
+  maxDezoomDist: 0,
   /** Risolto quando sfera + scena sono pronti */
   ready: null,
 };
@@ -192,6 +196,7 @@ async function boot() {
         state.started && state.navReady && !state.autoplayOn && !state.mediaFocus?.animating,
       onInspectChange: (on) => {
         state.isInspectingMedia = on;
+        updateCameraViewOffset();
         if (on) {
           state.mediaHover?.hide?.();
           state.cursor?.reset?.();
@@ -546,6 +551,8 @@ function bindStartGate() {
     btn.blur();
     // Leave ACCESS diamond → square for exploration
     state.cursor?.reset?.();
+    // Wait a frame so HUD width is laid out, then shift optical center
+    requestAnimationFrame(() => updateCameraViewOffset());
 
     await ensureHeartbeat();
     resumeActiveVideos(state.sphere);
@@ -593,11 +600,27 @@ function setupThree(canvas) {
 
   // Vista iniziale: tutta la sfera (raggio fisso) con margine
   frameWholeSphere(camera, controls, SPHERE_RADIUS);
+  const overviewDist = camera.position.distanceTo(controls.target);
+  const maxDist = Math.max(SPHERE_RADIUS * 2.9, overviewDist);
+  controls.maxDistance = maxDist;
+  state.maxDezoomDist = maxDist;
 
   state.renderer = renderer;
   state.scene = scene;
   state.camera = camera;
   state.controls = controls;
+
+  state.ctScales = createCtScales(document.body, {
+    getCamera: () => state.camera,
+    getControls: () => state.controls,
+    getRadius: () => state.sphere?.radius || SPHERE_RADIUS,
+    getMaxDezoomDist: () => state.maxDezoomDist || state.controls?.maxDistance || 0,
+    isVisibleAllowed: () =>
+      state.started &&
+      !state.autoplayOn &&
+      !state.isInspectingMedia &&
+      !state.introTween,
+  });
 
   // Zoom subito dopo l’intro (senza dover cliccare prima la canvas)
   const _zoomOffset = new THREE.Vector3();
@@ -622,8 +645,8 @@ function setupThree(canvas) {
       const dist = _zoomOffset.length();
       if (dist < 1e-6) return;
 
-      // deltaY > 0 → zoom out (lontano dal target)
-      const factor = Math.exp(0.0018 * (controls.zoomSpeed || 1) * e.deltaY);
+      // Fingers up / wheel forward → zoom in; fingers down / wheel back → zoom out
+      const factor = Math.exp(0.0018 * (controls.zoomSpeed || 1) * -e.deltaY);
       const next = THREE.MathUtils.clamp(
         dist * factor,
         controls.minDistance,
@@ -638,9 +661,33 @@ function setupThree(canvas) {
 
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+    updateCameraViewOffset();
   });
+}
+
+/**
+ * Optical center = midpoint of the free band beside the HUD (not screen center).
+ * Overview: slight vertical lift. Inspect / autoplay: true vertical center.
+ */
+function updateCameraViewOffset() {
+  const camera = state.camera;
+  if (!camera) return;
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const entered = document.body.classList.contains("is-entered");
+  const hudEl = document.querySelector(".hud");
+  const hudW =
+    entered && hudEl ? Math.round(hudEl.getBoundingClientRect().width) : 0;
+
+  if (hudW > 1) {
+    // Inspect: drop lift → true vertical center. Autoplay: keep lift (no jump from overview).
+    const liftY = state.isInspectingMedia ? 0 : Math.round(h * 0.028);
+    camera.setViewOffset(w, h, -hudW * 0.40, liftY, w, h);
+  } else {
+    camera.clearViewOffset();
+  }
+  camera.updateProjectionMatrix();
 }
 
 /** Posiziona la camera fuori dalla sfera in modo da vederla intera. */
@@ -670,9 +717,11 @@ function enableOrbitNav() {
   controls.enablePan = false;
   controls.minDistance = 1.5;
   controls.maxDistance = maxDist;
+  state.maxDezoomDist = maxDist;
   controls.target.set(0, 0, 0);
   controls.update();
   state.navReady = true;
+  updateCameraViewOffset();
 
   // Drop focus from ACCESS so wheel/drag work immediately
   try {
@@ -890,6 +939,7 @@ async function setAutoplay(on) {
 
   if (on === state.autoplayOn) return;
   state.autoplayOn = on;
+  updateCameraViewOffset();
   state.mediaHover?.hide?.();
 
   if (on) {
@@ -967,6 +1017,8 @@ function animate() {
 
   if (!state.autoplayOn && !inspecting) state.mediaHover?.tick?.();
   else if (state.autoplayOn || inspecting) state.placeCaption?.();
+
+  state.ctScales?.tick?.();
 
   state.renderer.render(state.scene, state.camera);
 }

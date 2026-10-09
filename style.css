@@ -1007,6 +1007,108 @@ body.is-entered #c {
 }
 
 /* Media hover readout — white mono on live background */
+/* CT FOV micro-scales — max dezoom only */
+.ct-scales {
+  --ct-scale-edge: 0.85rem; /* matches .hud padding-bottom; JS syncs to footer gap */
+  --ct-scale-fg: #b8b8b8;
+  position: fixed;
+  inset: 0;
+  z-index: 11;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.28s ease, visibility 0.28s ease;
+}
+
+.ct-scales.is-visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+.ct-scale {
+  position: absolute;
+  color: var(--ct-scale-fg);
+  filter: var(--crt-filter);
+}
+
+.ct-scale__svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.ct-scale--h {
+  height: 36px;
+  bottom: var(--ct-scale-edge);
+}
+
+.ct-scale--v {
+  width: 36px;
+  right: var(--ct-scale-edge);
+}
+
+.ct-scale__labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.ct-scale__num,
+.ct-scale__unit {
+  position: absolute;
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  color: var(--ct-scale-fg);
+  text-shadow: var(--crt-shadow);
+  -webkit-font-smoothing: none;
+  text-rendering: optimizeSpeed;
+  white-space: nowrap;
+}
+
+.ct-scale--h .ct-scale__num {
+  bottom: 30px;
+  left: calc(var(--t) * 100%);
+  transform: translateX(-50%);
+}
+
+.ct-scale--h .ct-scale__num.is-min {
+  transform: translateX(0);
+}
+
+.ct-scale--h .ct-scale__num.is-max {
+  transform: translateX(-100%);
+}
+
+.ct-scale--h .ct-scale__unit {
+  bottom: 30px;
+  right: -1.65rem;
+}
+
+/* Labels sit toward the sphere (left of inward ticks) */
+.ct-scale--v .ct-scale__num {
+  right: calc(100% + 4px);
+  left: auto;
+  top: calc(var(--t) * 100%);
+  transform: translateY(-50%);
+}
+
+.ct-scale--v .ct-scale__num.is-max {
+  transform: translateY(0);
+}
+
+.ct-scale--v .ct-scale__num.is-min {
+  transform: translateY(-100%);
+}
+
+.ct-scale--v .ct-scale__unit {
+  right: calc(100% + 4px);
+  left: auto;
+  bottom: -1.05rem;
+}
+
 .media-hover-root {
   position: fixed;
   inset: 0;
